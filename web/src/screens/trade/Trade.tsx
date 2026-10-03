@@ -5,13 +5,14 @@ import { ChevronDownIcon, XIcon } from '../../components/icons';
 import { CoinIcon, Empty, Segmented, toast } from '../../components/ui';
 import { assetName, baseOf, fmtAsset, fmtDateTime, fmtPercent, fmtPrice, fmtTime, num, priceDigits } from '../../format';
 import { errorMessage, t } from '../../i18n';
-import { useNav } from '../../nav';
+import { useBackHandler, useNav } from '../../nav';
 import { confirm, haptic, selection } from '../../telegram';
 import { quoteOf, useMarket, type MarketState } from './market';
 import { OrderBook } from './OrderBook';
 import { TradeForm, type PriceRequest } from './TradeForm';
 
 function PairSheet({ symbols, current, onPick, onClose }: { symbols: string[]; current: string; onPick: (s: string) => void; onClose: () => void }) {
+    useBackHandler(onClose);
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
         window.addEventListener('keydown', onKey);

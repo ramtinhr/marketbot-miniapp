@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
-import type { User } from '../api';
+import { api, type User } from '../api';
 import {
     AlertIcon,
     AtSignIcon,
@@ -141,14 +141,32 @@ export function PhoneScreen({ onShare, error }: { onShare: () => Promise<void>; 
     );
 }
 
+// One fetch per user per app run: the avatar remounts on every tab switch.
+const photos = new Map<number, Promise<string | null>>();
+
+/**
+ * The photo the bot fetched through the Bot API, served by our own origin;
+ * failing that the launch parameters' photo_url (on t.me, which the webview
+ * cannot always reach); failing both, the name's initial.
+ */
 function Avatar({ user }: { user: User }) {
     const tgUser = webApp()?.initDataUnsafe.user;
-    const photo = tgUser?.id === user.telegram_id ? tgUser.photo_url : undefined;
-    const [failed, setFailed] = useState(false);
+    const fallback = tgUser?.id === user.telegram_id ? tgUser.photo_url : undefined;
+    const [sources, setSources] = useState<string[]>([]);
+    useEffect(() => {
+        let live = true;
+        if (!photos.has(user.telegram_id)) photos.set(user.telegram_id, api.photo());
+        photos.get(user.telegram_id)!.then((own) => {
+            if (live) setSources([own, fallback].filter((s): s is string => Boolean(s)));
+        });
+        return () => {
+            live = false;
+        };
+    }, [user.telegram_id, fallback]);
     const initial = (user.first_name || user.username || '؟').trim().charAt(0).toUpperCase();
     return (
         <span className="avatar" aria-hidden="true">
-            {photo && !failed ? <img src={photo} alt="" onError={() => setFailed(true)} /> : initial}
+            {sources.length ? <img src={sources[0]} alt="" onError={() => setSources((s) => s.slice(1))} /> : initial}
         </span>
     );
 }

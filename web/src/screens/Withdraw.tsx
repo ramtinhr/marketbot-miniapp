@@ -6,6 +6,7 @@ import { MainAction } from '../components/MainAction';
 import { Alert, AmountInput, Badge, CoinIcon, Empty, PageHeader, Segmented, toast } from '../components/ui';
 import { asciiNumber, assetDigits, assetName, fmtAsset, fmtDateTime, parseAmount, toAmount } from '../format';
 import { errorMessage, t, type MessageKey } from '../i18n';
+import { useBackHandler } from '../nav';
 import { confirm, haptic, selection } from '../telegram';
 import { useUser } from '../user';
 import { balanceOf, refreshWallet, useWallet } from '../wallet';
@@ -46,6 +47,7 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
     const [amount, setAmount] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [step, setStep] = useState<'form' | 'otp'>('form');
+    useBackHandler(step === 'otp' && (() => setStep('form')));
 
     const load = useCallback(() => api.withdrawals().then((r) => {
         setNetworks(r.networks);

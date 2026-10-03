@@ -110,6 +110,16 @@ export const api = {
     signInWithPhone: (initData: string, contact: string) =>
         post<SignIn & { status: 'ok' }>('/auth/phone', { init_data: initData, contact }),
     me: () => request<{ user: User; verified: boolean }>('/me'),
+    /** The profile photo as an object URL, or null if there is none or it cannot be had. */
+    photo: async (): Promise<string | null> => {
+        try {
+            const res = await fetch(`${API_BASE}/me/photo`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+            if (!res.ok || !res.headers.get('content-type')?.startsWith('image/')) return null;
+            return URL.createObjectURL(await res.blob());
+        } catch {
+            return null;
+        }
+    },
 
     sendLoginCode: () => post<OtpSent>('/auth/otp/send'),
     verifyLoginCode: (code: string) => post<{ verified: true }>('/auth/otp/verify', { code }),

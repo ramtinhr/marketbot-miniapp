@@ -1,6 +1,10 @@
 // Navigation: three tabs, each a root page, and a stack of pages opened from
-// them (an asset, the charge form ...). Telegram's back button, in its
-// header, pops the stack; outside Telegram a back arrow in the page does.
+// them (an asset, the charge form ...). Back - Telegram's header button (and
+// Android's back key, which Telegram routes to it), or outside Telegram a back
+// arrow in the page - undoes the last thing, in this order: whatever a screen
+// registered with useBackHandler (a sheet, a step of a form), the top page,
+// then a tab other than home. Only on home with nothing open does Telegram's
+// own close button remain.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
@@ -19,11 +23,15 @@ interface Nav {
     stack: Page[];
     /** The pair the trade tab shows. */
     symbol: string;
+    /** Whether back has anything to undo. */
+    canGoBack: boolean;
     setTab(tab: Tab): void;
     push(page: Page): void;
     back(): void;
     /** Switches to the trade tab on `symbol`, closing any open pages. */
     trade(symbol: string): void;
+    /** @internal see useBackHandler */
+    addHandler(handler: { current: () => void }): () => void;
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -34,10 +42,34 @@ export function useNav(): Nav {
     return nav;
 }
 
+/**
+ * While `handler` is given, back calls it instead of leaving the page: for a
+ * sheet to close or a form step to go back to the previous one. The latest
+ * registered handler wins.
+ */
+export function useBackHandler(handler: (() => void) | null | false | undefined): void {
+    const { addHandler } = useNav();
+    const ref = useRef<() => void>(() => {});
+    if (handler) ref.current = handler;
+    const active = Boolean(handler);
+    useEffect(() => (active ? addHandler(ref) : undefined), [active, addHandler]);
+}
+
 export function NavProvider({ initialTab = 'home', initialStack = [], children }: { initialTab?: Tab; initialStack?: Page[]; children: ReactNode }) {
     const [tab, setTabState] = useState<Tab>(initialTab);
     const [stack, setStack] = useState<Page[]>(initialStack);
     const [symbol, setSymbol] = useState('USDT_IRT');
+    const handlers = useRef<{ current: () => void }[]>([]);
+    const [handlerCount, setHandlerCount] = useState(0);
+
+    const addHandler = useCallback((handler: { current: () => void }) => {
+        handlers.current.push(handler);
+        setHandlerCount(handlers.current.length);
+        return () => {
+            handlers.current = handlers.current.filter((h) => h !== handler);
+            setHandlerCount(handlers.current.length);
+        };
+    }, []);
 
     const setTab = useCallback((next: Tab) => {
         selection();
@@ -49,7 +81,6 @@ export function NavProvider({ initialTab = 'home', initialStack = [], children }
         setStack((s) => [...s, page]);
         window.scrollTo(0, 0);
     }, []);
-    const back = useCallback(() => setStack((s) => s.slice(0, -1)), []);
     const trade = useCallback((next: string) => {
         setSymbol(next);
         setTabState('trade');
@@ -57,23 +88,38 @@ export function NavProvider({ initialTab = 'home', initialStack = [], children }
         window.scrollTo(0, 0);
     }, []);
 
-    // Telegram's header back button, shown while a page is open.
-    const backRef = useRef(back);
-    backRef.current = back;
-    useEffect(() => {
-        const app = webApp();
-        if (!app || !app.isVersionAtLeast('6.1')) return;
-        const onBack = () => backRef.current();
-        app.BackButton.onClick(onBack);
-        return () => app.BackButton.offClick(onBack);
+    const canGoBack = handlerCount > 0 || stack.length > 0 || tab !== 'home';
+    const state = useRef({ stack, tab });
+    state.current = { stack, tab };
+    const back = useCallback(() => {
+        const top = handlers.current.at(-1);
+        if (top) return top.current();
+        if (state.current.stack.length) {
+            setStack((s) => s.slice(0, -1));
+            window.scrollTo(0, 0);
+        } else if (state.current.tab !== 'home') {
+            setTabState('home');
+            window.scrollTo(0, 0);
+        }
     }, []);
+
     useEffect(() => {
         const app = webApp();
         if (!app || !app.isVersionAtLeast('6.1')) return;
-        if (stack.length) app.BackButton.show();
+        app.BackButton.onClick(back);
+        return () => app.BackButton.offClick(back);
+    }, [back]);
+    useEffect(() => {
+        const app = webApp();
+        if (!app || !app.isVersionAtLeast('6.1')) return;
+        if (canGoBack) app.BackButton.show();
         else app.BackButton.hide();
-    }, [stack.length]);
+    }, [canGoBack]);
+    useEffect(() => () => webApp()?.BackButton.hide(), []);
 
-    const value = useMemo(() => ({ tab, stack, symbol, setTab, push, back, trade }), [tab, stack, symbol, setTab, push, back, trade]);
+    const value = useMemo(
+        () => ({ tab, stack, symbol, canGoBack, setTab, push, back, trade, addHandler }),
+        [tab, stack, symbol, canGoBack, setTab, push, back, trade, addHandler],
+    );
     return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

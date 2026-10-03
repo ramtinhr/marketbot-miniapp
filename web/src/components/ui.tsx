@@ -33,7 +33,7 @@ export function PageHeader({ title, subtitle }: { title: string; subtitle?: stri
     const inTelegram = Boolean(webApp());
     return (
         <header className="page-header">
-            {!inTelegram && nav.stack.length > 0 && (
+            {!inTelegram && nav.canGoBack && (
                 <button type="button" className="icon-button" onClick={nav.back} aria-label={t('common.back')}>
                     <ChevronStartIcon />
                 </button>

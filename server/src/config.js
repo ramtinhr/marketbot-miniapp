@@ -48,6 +48,13 @@ export const config = {
     idleMinutes: int('SESSION_IDLE_MINUTES', 10_080),
   },
 
+  // Bot API calls (profile photos) through the bot's HTTP relay, where
+  // api.telegram.org is blocked; empty calls Telegram directly.
+  telegram: {
+    proxyUrl: str('TELEGRAM_PROXY_URL', ''),
+    proxyKey: str('TELEGRAM_PROXY_KEY', ''),
+  },
+
   otp: {
     ttlSeconds: int('OTP_TTL_SECONDS', 120),
     resendSeconds: int('OTP_RESEND_SECONDS', 60),

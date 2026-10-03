@@ -38,9 +38,10 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  * @param {{ users: import('./store.js').UserStore, otp?: import('./otp.js').OtpService,
  *           wallets?: import('./wallets.js').Wallets, payments?: import('./payments.js').Payments,
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
- *           hub?: import('./hub.js').Hub, botUsername?: string, logger?: object|boolean }} deps
+ *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
+ *           botUsername?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, hub, botUsername = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, hub, photos, botUsername = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -144,6 +145,19 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
       });
 
       api.get('/me', { preHandler: requireUser }, async (req) => ({ user: req.user, verified: Boolean(req.session?.verified) }));
+
+      if (photos) {
+        api.get('/me/photo', { preHandler: requireUser }, async (req, reply) => {
+          let photo;
+          try {
+            photo = await photos.photo(req.user.telegram_id);
+          } catch {
+            throw httpError(502, 'telegram_unavailable', 'could not reach Telegram for the profile photo');
+          }
+          if (!photo) throw httpError(404, 'no_photo', 'this account has no profile photo, or hides it');
+          return reply.header('cache-control', 'private, max-age=3600').type(photo.type).send(photo.data);
+        });
+      }
 
       if (otp) {
         api.post('/auth/otp/send', { preHandler: requireUser }, async (req) => {
