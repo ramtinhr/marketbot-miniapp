@@ -18,7 +18,7 @@ services:
     container_name: marketbot-miniapp-server
     env_file: .env
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DB_HOST: localhost
       KAFKA_BROKERS: ${KAFKA_BROKERS:-127.0.0.1:9092}
       # Loopback only: the web container's nginx is its only client, and the
