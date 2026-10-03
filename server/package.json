@@ -1,0 +1,22 @@
+{
+  "name": "marketbot-miniapp-server",
+  "version": "0.1.0",
+  "description": "Backend of MarketBot's Telegram Mini App: Telegram sign-in with an Iranian phone number, and the app's own API",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.1"
+  }
+}

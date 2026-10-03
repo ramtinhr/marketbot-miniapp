@@ -1,0 +1,82 @@
+@font-face {
+    font-family: 'Vazirmatn';
+    src: url('/fonts/Vazirmatn[wght].woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+/* Telegram's theme (set by telegram-web-app.js), with fallbacks for a browser. */
+:root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #000000);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --button: var(--tg-theme-button-color, #2481cc);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --card: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    --danger: var(--tg-theme-destructive-text-color, #e53935);
+    --radius: 14px;
+    color-scheme: light dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Vazirmatn', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+}
+
+h1 { font-size: 1.35rem; margin: 0 0 .5rem; line-height: 1.5; }
+h2 { font-size: 1.05rem; margin: 0 0 .25rem; }
+p { margin: 0 0 .75rem; }
+
+.screen {
+    min-height: var(--tg-viewport-stable-height, 100vh);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1.5rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom));
+}
+.screen.center { align-items: center; justify-content: center; text-align: center; }
+.grow { flex: 1; }
+
+.hint { color: var(--hint); font-size: .92rem; }
+.error { color: var(--danger); font-size: .92rem; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.icon { font-size: 3rem; margin: 1rem 0; }
+
+.card { background: var(--card); border-radius: var(--radius); padding: 1rem 1.1rem; }
+.card.row { display: flex; justify-content: space-between; align-items: center; }
+
+.button {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-radius: var(--radius);
+    padding: .9rem 1rem;
+    background: var(--button);
+    color: var(--button-text);
+    font: inherit;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+}
+.button:disabled { opacity: .6; cursor: default; }
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid var(--card);
+    border-top-color: var(--button);
+    animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

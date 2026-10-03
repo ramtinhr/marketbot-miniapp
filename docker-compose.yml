@@ -1,0 +1,28 @@
+# Both halves on the host network, next to the bot's Postgres:
+#   docker compose up --build    -> http://localhost:${WEB_PORT:-8082}
+# The server reads server/.env (DB_*, BOT_TOKEN); see server/.env.example.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: marketbot-miniapp-server
+    network_mode: host
+    env_file: server/.env
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_BOT_USERNAME: ${VITE_BOT_USERNAME:-}
+    image: marketbot-miniapp-web
+    network_mode: host
+    environment:
+      API_UPSTREAM: http://127.0.0.1:${SERVER_PORT:-8090}
+      WEB_HOST: ${WEB_HOST:-0.0.0.0}
+      WEB_PORT: ${WEB_PORT:-8082}
+    depends_on:
+      - server
+    restart: unless-stopped

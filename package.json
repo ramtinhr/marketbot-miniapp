@@ -1,0 +1,18 @@
+{
+  "name": "marketbot-miniapp",
+  "version": "0.1.0",
+  "description": "MarketBot's Telegram Mini App: the users' app (web/) and its own backend (server/)",
+  "private": true,
+  "license": "UNLICENSED",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "typecheck": "npm run typecheck -w web",
+    "test": "npm test -w server"
+  }
+}
