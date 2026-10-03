@@ -8,42 +8,18 @@
 
 import crypto from 'node:crypto';
 
-import { httpError } from './errors.js';
+import { exchangeDbError, httpError } from './errors.js';
 import { normalizeIranMobile } from './phone.js';
+import { schemaReady } from './schema.js';
 import { verifySigned } from './telegram.js';
 
 // Written only after this long without one, so a polling page costs a read
 // per request rather than a write.
 const TOUCH_EVERY_MS = 60_000;
 
-const sha256 = (token) => crypto.createHash('sha256').update(token).digest('hex');
+export const sha256 = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS miniapp_users (
-  id            BIGSERIAL PRIMARY KEY,
-  telegram_id   BIGINT NOT NULL UNIQUE,
-  phone         TEXT UNIQUE,
-  first_name    TEXT,
-  last_name     TEXT,
-  username      TEXT,
-  language_code TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_login_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  blocked_at    TIMESTAMPTZ
-);
-CREATE TABLE IF NOT EXISTS miniapp_sessions (
-  token_hash   TEXT PRIMARY KEY,
-  user_id      BIGINT NOT NULL REFERENCES miniapp_users(id) ON DELETE CASCADE,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at   TIMESTAMPTZ NOT NULL,
-  ip           TEXT,
-  user_agent   TEXT
-);
-CREATE INDEX IF NOT EXISTS miniapp_sessions_user_idx ON miniapp_sessions (user_id);
-`;
-
-const USER_COLUMNS = 'id, telegram_id, phone, first_name, last_name, username, created_at, blocked_at';
+const USER_COLUMNS = 'id, telegram_id, phone, first_name, last_name, username, created_at, blocked_at, exchange_user_id';
 
 /** What the app is shown about its user. */
 export function publicUser(row) {
@@ -70,7 +46,6 @@ export class UserStore {
     this.contactMaxAgeSeconds = contactMaxAgeSeconds;
     this.ttlMs = ttlHours * 3600_000;
     this.idleMs = idleMinutes * 60_000;
-    this.readyPromise = null;
   }
 
   get configured() {
@@ -79,13 +54,7 @@ export class UserStore {
 
   /** Creates the tables once; a failure is retried on the next call. */
   ready() {
-    if (!this.readyPromise) {
-      this.readyPromise = this.pg.query(SCHEMA).catch((err) => {
-        this.readyPromise = null;
-        throw err;
-      });
-    }
-    return this.readyPromise;
+    return schemaReady(this.pg);
   }
 
   /** The Telegram account that opened the app, from its launch parameters. */
@@ -168,16 +137,21 @@ export class UserStore {
       `DELETE FROM miniapp_sessions WHERE expires_at < now() OR last_seen_at < now() - ($1::float8 * interval '1 millisecond')`,
       [this.idleMs],
     );
-    return { token, user: publicUser(rows[0]) };
+    return { token, user: publicUser(rows[0]), verified: false };
   }
 
-  /** The signed-in user for a bearer token, or null. */
+  /**
+   * The signed-in user for a bearer token, or null: `{ user, session }`, where
+   * `session.verified` says whether this session has confirmed an SMS code,
+   * and `session.exchangeUserId` is the user's exchange account, if linked.
+   */
   async authenticate(token) {
     if (!token) return null;
     await this.ready();
     const hash = sha256(token);
     const { rows } = await this.pg.query(
-      `SELECT u.id, u.telegram_id, u.phone, u.first_name, u.last_name, u.username, u.created_at, s.last_seen_at
+      `SELECT u.id, u.telegram_id, u.phone, u.first_name, u.last_name, u.username, u.created_at, u.exchange_user_id,
+              s.last_seen_at, s.otp_verified_at
          FROM miniapp_sessions s JOIN miniapp_users u ON u.id = s.user_id
         WHERE s.token_hash = $1 AND u.blocked_at IS NULL AND u.phone IS NOT NULL AND s.expires_at > now()
           AND s.last_seen_at > now() - ($2::float8 * interval '1 millisecond')`,
@@ -188,7 +162,53 @@ export class UserStore {
     if (Date.now() - new Date(row.last_seen_at).getTime() > TOUCH_EVERY_MS) {
       await this.pg.query('UPDATE miniapp_sessions SET last_seen_at = now() WHERE token_hash = $1', [hash]);
     }
-    return publicUser(row);
+    return {
+      user: publicUser(row),
+      session: {
+        tokenHash: hash,
+        verified: Boolean(row.otp_verified_at),
+        exchangeUserId: row.exchange_user_id,
+        phone: row.phone,
+      },
+    };
+  }
+
+  /**
+   * Marks the session as having confirmed an SMS code, and links the user to
+   * an exchange account - the one with this phone number if an operator made
+   * it, else a new one. The exchange only trades for `active` users.
+   */
+  async verifySession(tokenHash, user) {
+    const client = await this.pg.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT exchange_user_id FROM miniapp_users WHERE id = $1 FOR UPDATE', [user.id]);
+      let exchangeUserId = rows[0]?.exchange_user_id ?? null;
+      if (!exchangeUserId) {
+        const found = await client.query('SELECT id FROM exchange.users WHERE phone = $1', [user.phone]);
+        if (found.rows.length) {
+          exchangeUserId = found.rows[0].id;
+        } else {
+          const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username || user.phone;
+          const created = await client.query(
+            `INSERT INTO exchange.users (username, display_name, first_name, last_name, phone, status, is_demo, created_by)
+             VALUES ($1, $2, $3, $4, $5, 'active', false, 'miniapp') RETURNING id`,
+            [`tg${user.telegram_id}`, displayName, user.first_name, user.last_name, user.phone],
+          );
+          exchangeUserId = created.rows[0].id;
+        }
+        await client.query('UPDATE miniapp_users SET exchange_user_id = $2 WHERE id = $1', [user.id, exchangeUserId]);
+      }
+      await client.query('UPDATE miniapp_users SET phone_verified_at = now() WHERE id = $1', [user.id]);
+      await client.query('UPDATE miniapp_sessions SET otp_verified_at = now() WHERE token_hash = $1', [tokenHash]);
+      await client.query('COMMIT');
+      return exchangeUserId;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw exchangeDbError(err);
+    } finally {
+      client.release();
+    }
   }
 
   async logout(token) {

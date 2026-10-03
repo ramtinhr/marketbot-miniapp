@@ -2,18 +2,25 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import App from './App';
-import { webApp } from './telegram';
+import { setUpChrome, webApp } from './telegram';
 import './styles.css';
 
 const tg = webApp();
-if (tg) {
-    tg.ready();
-    tg.expand();
-    document.documentElement.dataset.scheme = tg.colorScheme;
+if (tg) setUpChrome(tg);
+
+function render() {
+    createRoot(document.getElementById('root')!).render(
+        <StrictMode>
+            <App />
+        </StrictMode>,
+    );
 }
 
-createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-        <App />
-    </StrictMode>,
-);
+if (import.meta.env.DEV && new URLSearchParams(location.search).has('preview')) {
+    void import('./preview').then((m) => {
+        m.installPreview();
+        render();
+    });
+} else {
+    render();
+}

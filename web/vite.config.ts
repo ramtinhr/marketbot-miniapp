@@ -6,7 +6,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const target = env.API_PROXY_TARGET || 'http://127.0.0.1:8090';
-  const proxy = { '/api': { target, changeOrigin: true } };
+  // ws: the trade page's live book comes over /api/v1/market/ws.
+  const proxy = { '/api': { target, changeOrigin: true, ws: true } };
   return {
     plugins: [react()],
     server: {

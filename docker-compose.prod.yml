@@ -1,0 +1,61 @@
+# Production compose file. Never builds - it runs the exact images CI built,
+# side-loaded by the deploy workflow. Config comes from the .env next to this
+# file on the server, which the deploy workflow writes from GitHub Secrets.
+#
+# Deployed to the same host as the bot, the exchange engine and marketbot-api.
+# Postgres and Kafka are the bot's, reached at localhost on the host network.
+# Neither container has TLS of its own: both listen on loopback only, and
+# marketbot-api's nginx serves the web container on MINIAPP_DOMAIN over HTTPS
+# (MINIAPP_DOMAIN and MINIAPP_PORT in that repo's API_ENV). Deploy the bot, the
+# engine and the API first.
+
+services:
+  server:
+    image: ${MINIAPP_SERVER_IMAGE:?MINIAPP_SERVER_IMAGE must be set in .env}
+    # This host has no route to a registry, so a pull would hang instead of
+    # failing usefully.
+    pull_policy: never
+    container_name: marketbot-miniapp-server
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DB_HOST: localhost
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-127.0.0.1:9092}
+      # Loopback only: the web container's nginx is its only client, and the
+      # server trusts X-Forwarded-For from loopback only.
+      HOST: 127.0.0.1
+      PORT: ${SERVER_PORT:-8090}
+      # Fail the deploy here rather than start a server that answers 503 to
+      # every sign-in.
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN must be set in .env}
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL must be set in .env - https://MINIAPP_DOMAIN}
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:${SERVER_PORT:-8090}/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    image: ${MINIAPP_WEB_IMAGE:?MINIAPP_WEB_IMAGE must be set in .env}
+    pull_policy: never
+    container_name: marketbot-miniapp-web
+    environment:
+      API_UPSTREAM: http://127.0.0.1:${SERVER_PORT:-8090}
+      # Loopback only. On the host network 0.0.0.0 would publish the app, and
+      # the server behind it, to the internet over plain HTTP.
+      WEB_HOST: 127.0.0.1
+      # Must match MINIAPP_PORT in marketbot-api's .env, where its nginx looks.
+      WEB_PORT: ${WEB_PORT:-8082}
+    network_mode: host
+    depends_on:
+      - server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:${WEB_PORT:-8082}/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

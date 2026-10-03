@@ -24,7 +24,10 @@ function fakeUsers({ configured = true } = {}) {
       if (contact === 'foreign') throw httpError(400, 'phone_not_iranian', 'only Iranian mobile numbers');
       return start(7);
     },
-    async authenticate(token) { return sessions.get(token) ?? null; },
+    async authenticate(token) {
+      const user = sessions.get(token);
+      return user ? { user, session: { tokenHash: token, verified: false, exchangeUserId: null, phone: user.phone } } : null;
+    },
     async logout(token) { sessions.delete(token); },
   };
 }

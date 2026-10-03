@@ -1,0 +1,79 @@
+name: Telegram notification
+description: >
+  Send one HTML message to a Telegram chat via the Bot API. Never fails the
+  job: an unconfigured bot is skipped and a Telegram error is a warning, since
+  a missed notification must not turn a green build red or a finished deploy
+  into a failure.
+
+inputs:
+  bot_token:
+    description: Bot token from @BotFather. Empty means "notifications are off".
+    required: false
+    default: ""
+  chat_id:
+    description: >
+      Numeric chat ID to post to (a channel looks like -1001234567890, not
+      @name). Empty means "notifications are off".
+    required: false
+    default: ""
+  message:
+    description: >
+      Message body, in Telegram's HTML subset. Anything interpolated into it
+      must already have &, < and > escaped; unparseable markup is re-sent as
+      plain text rather than dropped.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Send Telegram message
+      shell: bash
+      env:
+        BOT_TOKEN: ${{ inputs.bot_token }}
+        CHAT_ID: ${{ inputs.chat_id }}
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        set -uo pipefail
+
+        if [ -z "${BOT_TOKEN}" ] || [ -z "${CHAT_ID}" ]; then
+          echo "::notice::Telegram secrets not set - skipping notification."
+          exit 0
+        fi
+
+        # Belt and braces: the token is masked as a secret already, but curl
+        # errors can quote the URL it was given.
+        echo "::add-mask::${BOT_TOKEN}"
+
+        # send <parse_mode|""> - posts $MESSAGE once; prints Telegram's own
+        # ok/description, since the HTTP status alone does not carry it.
+        send() {
+          jq -n --arg chat_id "$CHAT_ID" --arg text "$MESSAGE" --arg mode "$1" \
+            '{chat_id: $chat_id, text: $text, disable_web_page_preview: true}
+             + (if $mode == "" then {} else {parse_mode: $mode} end)' > payload.json
+          curl -sS --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -d @payload.json \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" 2>&1
+        }
+
+        # Telegram reports the real outcome in the body's "ok", so the body is
+        # what is read - and a body that is not JSON at all (curl's own error
+        # text) has to read as a failure with a reason, not as an empty one.
+        ok() { printf '%s' "$1" | jq -r '.ok // false' 2>/dev/null; }
+        why() {
+          reason=$(printf '%s' "$1" | jq -r '.description // empty' 2>/dev/null)
+          printf '%s' "${reason:-${1:-no response from Telegram}}"
+        }
+
+        response=$(send HTML)
+        if [ "$(ok "$response")" != "true" ]; then
+          # A stray tag in a commit subject must not be what stops the message
+          # from arriving, so a markup rejection is retried without formatting.
+          case "$(why "$response")" in
+            *"an't parse entities"*) response=$(send "") ;;
+          esac
+          if [ "$(ok "$response")" != "true" ]; then
+            echo "::warning::Telegram notification failed: $(why "$response")"
+          fi
+        fi
+        rm -f payload.json

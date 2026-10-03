@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, ApiError, setToken, type User } from './api';
-import { ErrorScreen, Home, Loading, OutsideTelegram, PhoneScreen } from './screens/Screens';
+import { reauthenticate } from './live';
+import type { Page, Tab } from './nav';
+import { OtpScreen } from './screens/Otp';
+import { ErrorScreen, Loading, OutsideTelegram, PhoneScreen } from './screens/Screens';
+import { Shell } from './screens/Shell';
 import { ContactError, haptic, requestContact, webApp } from './telegram';
 
 // Telegram keeps this per bot across launches, so reopening the app skips the
@@ -14,7 +18,46 @@ type State =
     | { kind: 'outside' }
     | { kind: 'phone'; error: string | null }
     | { kind: 'error'; code: string }
-    | { kind: 'home'; user: User };
+    // Signed in, but money waits for the SMS code (once per session).
+    | { kind: 'otp'; user: User }
+    | { kind: 'app'; user: User; tab?: Tab; stack?: Page[] };
+
+export const PREVIEW_USER: User = {
+    id: 1,
+    telegram_id: 1,
+    phone: '+989121234567',
+    first_name: 'رامتین',
+    last_name: null,
+    username: 'ramtin',
+    created_at: new Date().toISOString(),
+};
+
+/**
+ * Development only: `?preview=<screen>` shows that screen with sample data
+ * (see preview.ts, which also fakes the server), so the UI can be worked on
+ * in a browser.
+ */
+function previewState(): State | null {
+    if (!import.meta.env.DEV) return null;
+    const preview = new URLSearchParams(window.location.search).get('preview');
+    const user = PREVIEW_USER;
+    switch (preview) {
+        case 'loading': return { kind: 'loading' };
+        case 'outside': return { kind: 'outside' };
+        case 'phone': return { kind: 'phone', error: null };
+        case 'phone-error': return { kind: 'phone', error: 'phone_not_iranian' };
+        case 'error': return { kind: 'error', code: 'network' };
+        case 'otp': return { kind: 'otp', user };
+        case 'home': return { kind: 'app', user };
+        case 'wallet': return { kind: 'app', user, tab: 'wallet' };
+        case 'trade': return { kind: 'app', user, tab: 'trade' };
+        case 'asset': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'asset', asset: 'USDT' }] };
+        case 'charge': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'charge' }] };
+        case 'deposit': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'deposit' }] };
+        case 'withdraw': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'withdraw' }] };
+        default: return null;
+    }
+}
 
 const codeOf = (err: unknown) => (err instanceof ApiError || err instanceof ContactError ? err.code : 'unknown');
 
@@ -34,8 +77,11 @@ function remember(token: string | null) {
     } catch { /* storage unavailable: the session lasts this launch */ }
 }
 
+const signedIn = (user: User, verified: boolean | undefined): State => (verified ? { kind: 'app', user } : { kind: 'otp', user });
+
 export default function App() {
-    const [state, setState] = useState<State>({ kind: 'loading' });
+    const [preview] = useState(previewState);
+    const [state, setState] = useState<State>(preview ?? { kind: 'loading' });
 
     const signIn = useCallback(async () => {
         const app = webApp();
@@ -45,15 +91,15 @@ export default function App() {
             const saved = savedToken();
             if (saved) {
                 setToken(saved);
-                const user = await api.me().catch(() => null);
+                const me = await api.me().catch(() => null);
                 // The same device can hold several Telegram accounts.
-                if (user && user.telegram_id === app.initDataUnsafe.user?.id) return setState({ kind: 'home', user });
+                if (me && me.user.telegram_id === app.initDataUnsafe.user?.id) return setState(signedIn(me.user, me.verified));
                 remember(null);
             }
             const res = await api.signIn(app.initData);
             if (res.status === 'phone_required') return setState({ kind: 'phone', error: null });
             remember(res.token);
-            setState({ kind: 'home', user: res.user });
+            setState(signedIn(res.user, res.verified));
         } catch (err) {
             setState({ kind: 'error', code: codeOf(err) });
         }
@@ -67,7 +113,7 @@ export default function App() {
             const res = await api.signInWithPhone(app.initData, contact);
             remember(res.token);
             haptic('success');
-            setState({ kind: 'home', user: res.user });
+            setState(signedIn(res.user, res.verified));
         } catch (err) {
             haptic('error');
             const code = codeOf(err);
@@ -76,15 +122,23 @@ export default function App() {
         }
     }, []);
 
+    const verify = useCallback(async (user: User, code: string) => {
+        await api.verifyLoginCode(code);
+        // The socket was told about the session before it could see money.
+        reauthenticate();
+        setState({ kind: 'app', user });
+    }, []);
+
     useEffect(() => {
-        void signIn();
-    }, [signIn]);
+        if (!preview) void signIn();
+    }, [signIn, preview]);
 
     switch (state.kind) {
         case 'loading': return <Loading />;
         case 'outside': return <OutsideTelegram />;
         case 'phone': return <PhoneScreen onShare={sharePhone} error={state.error} />;
         case 'error': return <ErrorScreen code={state.code} onRetry={signIn} />;
-        case 'home': return <Home user={state.user} />;
+        case 'otp': return <OtpScreen phone={state.user.phone} send={api.sendLoginCode} verify={(code) => verify(state.user, code)} />;
+        case 'app': return <Shell user={state.user} initialTab={state.tab} initialStack={state.stack} />;
     }
 }
