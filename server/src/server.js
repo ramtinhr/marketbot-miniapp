@@ -72,8 +72,10 @@ const bot = new Bot({
   pg,
   wallets,
   trading,
+  auction,
   log: bootLog,
 });
+auction.on('change', (change) => void bot.notifyAuction(change));
 
 const app = await buildApp({
   users,

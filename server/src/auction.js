@@ -205,6 +205,17 @@ export class Auction extends EventEmitter {
     });
   }
 
+  /** One order as the board shows it, with its pair, owner and whether it is still open; null if there is none. */
+  offer(id) {
+    if (!isUUID(id)) return Promise.resolve(null);
+    return this.#run(async () => {
+      const { rows } = await this.pg.query(`SELECT ${COLUMNS} FROM miniapp_auction_orders WHERE id = $1`, [id]);
+      if (!rows.length) return null;
+      const o = stateOf(rows[0]);
+      return { ...offerJson(o), symbol: o.symbol, owner: o.userId, open: OPEN.includes(o.status) };
+    });
+  }
+
   trades(symbol, limit = 40) {
     return this.#run(async () => {
       const { rows } = await this.pg.query(

@@ -42,17 +42,16 @@ const press = (data, from = 42) => ({
 });
 const buttons = (action) => action.reply_markup.inline_keyboard.flat();
 
-test('/start answers with a welcome and a reply keyboard of plain text buttons, open first', async () => {
+test('/start answers with a welcome and a 2 x 2 reply keyboard of plain, uncoloured text buttons', async () => {
   const [reply, ...rest] = await makeBot().handle(message('/start'));
   assert.equal(rest.length, 0);
   assert.equal(reply.method, 'sendMessage');
   assert.equal(reply.chat_id, 42);
   assert.match(reply.text, /سلام Ramtin/);
+  assert.deepEqual(reply.reply_markup.keyboard.map((row) => row.length), [2, 2]);
   const keys = reply.reply_markup.keyboard.flat();
-  assert.equal(keys[0].text, '🚀 باز کردن مارکت‌بات');
-  assert.equal(keys[0].style, 'primary');
-  assert.deepEqual(keys.map((k) => k.text).slice(1), ['🔨 مزایده', '💰 موجودی من', '💳 شارژ کیف پول']);
-  assert.ok(keys.every((k) => !k.style || ['primary', 'success', 'danger'].includes(k.style)));
+  assert.deepEqual(keys.map((k) => k.text), ['🔨 مزایده', '💰 موجودی من', '💳 شارژ کیف پول', '📱 باز کردن مارکت‌بات']);
+  assert.ok(keys.every((k) => !k.style));
   // A Mini App opened from a keyboard button gets no launch parameters to sign in with.
   assert.ok(keys.every((k) => !k.web_app));
   assert.equal(reply.reply_markup.resize_keyboard, true);

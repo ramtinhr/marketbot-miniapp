@@ -1,7 +1,8 @@
 // The bot's chat: /start (Telegram's Start button) answers with a welcome and a
-// reply keyboard - open the Mini App, the auction, the wallet's balances shown
-// right in the chat, charging the wallet. The chat's menu button opens the Mini
-// App directly; the empty chat shows the bot's description above Start.
+// reply keyboard - the auction (traded right in the chat, see bot-auction.js),
+// the wallet's balances, opening the Mini App, charging the wallet. The chat's
+// menu button opens the Mini App directly; the empty chat shows the bot's
+// description above Start.
 //
 // Updates come by webhook (POST /api/v1/telegram/webhook), answered in the
 // response body, so replying needs no call out to Telegram - which is blocked
@@ -12,6 +13,8 @@
 // webhook, so never point it at the production bot.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+
+import { AuctionChat } from './bot-auction.js';
 
 const API = 'https://api.telegram.org';
 
@@ -31,12 +34,13 @@ const KEYS = {
   charge: 'شارژ کیف پول',
 };
 
-// style: "primary" blue, "success" green, "danger" red; none is the app's own.
+// A plain 2 x 2 grid in Telegram's own colours. Buttons are coloured (style
+// "success" / "danger" / "primary") only where they commit to something: confirming
+// a buy or a sell, posting an offer.
 const KEYBOARD = {
   keyboard: [
-    [{ text: `🚀 ${KEYS.open}`, style: 'primary' }],
-    [{ text: `🔨 ${KEYS.auction}`, style: 'success' }, { text: `💰 ${KEYS.balance}` }],
-    [{ text: `💳 ${KEYS.charge}`, style: 'primary' }],
+    [{ text: `🔨 ${KEYS.auction}` }, { text: `💰 ${KEYS.balance}` }],
+    [{ text: `💳 ${KEYS.charge}` }, { text: `📱 ${KEYS.open}` }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -47,8 +51,8 @@ const KEYBOARD = {
 const DESCRIPTION = [
   'مارکت‌بات؛ خرید و فروش ارز دیجیتال با تومان، همین‌جا در تلگرام.',
   '',
+  '• مزایده: آگهی خرید و فروش، مثل گروه‌های تتر، همین‌جا در چت',
   '• معامله با سفارش بازار و محدود',
-  '• مزایده: پیشنهاد قیمت به کاربران دیگر',
   '• شارژ آنلاین کیف پول و برداشت',
   '',
   'برای شروع دکمهٔ «Start» را بزنید.',
@@ -70,9 +74,9 @@ export class Bot {
   /**
    * @param {{ botToken: string, publicUrl: string, proxyUrl?: string, proxyKey?: string, mode?: 'webhook'|'polling'|'off',
    *           pg: import('pg').Pool, wallets?: import('./wallets.js').Wallets, trading?: import('./trading.js').Trading,
-   *           timeoutMs?: number, log?: object }} opts
+   *           auction?: import('./auction.js').Auction, timeoutMs?: number, log?: object }} opts
    */
-  constructor({ botToken, publicUrl, proxyUrl = '', proxyKey = '', mode = 'off', pg, wallets, trading, timeoutMs = 15_000, log }) {
+  constructor({ botToken, publicUrl, proxyUrl = '', proxyKey = '', mode = 'off', pg, wallets, trading, auction, timeoutMs = 15_000, log }) {
     this.botToken = botToken;
     this.publicUrl = publicUrl.replace(/\/+$/, '');
     this.proxyUrl = proxyUrl.replace(/\/+$/, '');
@@ -86,6 +90,17 @@ export class Bot {
     // Telegram echoes it in a header on every webhook call; derived, so there is nothing more to configure.
     this.webhookSecret = botToken ? createHmac('sha256', botToken).update('telegram-webhook').digest('hex') : '';
     this.polling = false;
+    this.auction = auction ? new AuctionChat({ pg, auction, wallets, trading, appUrl: (screen) => this.appUrl(screen) }) : null;
+  }
+
+  /** Tells whoever posted an auction offer that it was taken: messages out through the relay, so only with Telegram on. */
+  async notifyAuction(change) {
+    if (!this.auction || this.mode === 'off' || !change.trades?.length) return;
+    try {
+      for (const action of await this.auction.notifications(change)) await this.run(action).catch((err) => this.#warn(err, 'bot: auction notice failed'));
+    } catch (err) {
+      this.#warn(err, 'bot: auction notices failed');
+    }
   }
 
   /** Whether a webhook call carries this bot's secret. */
@@ -189,7 +204,7 @@ export class Bot {
       // A key's text, without the emoji in front of it.
       switch (text.replace(/^[^\p{L}/]+/u, '')) {
         case KEYS.open: return [this.openMessage(chatId)];
-        case KEYS.auction: return [this.auctionMessage(chatId)];
+        case KEYS.auction: return [await this.auctionMessage(chatId, msg.from.id)];
         case KEYS.balance: return [await this.balanceMessage(chatId, msg.from.id)];
         case KEYS.charge: return [this.openMessage(chatId, 'charge')];
       }
@@ -198,20 +213,23 @@ export class Bot {
         case '/balance':
           return [await this.balanceMessage(chatId, msg.from.id)];
         case '/auction':
-          return [this.auctionMessage(chatId)];
+          return [await this.auctionMessage(chatId, msg.from.id)];
         case '/start':
           if (payload === 'balance') return [await this.balanceMessage(chatId, msg.from.id)];
-          if (payload === 'auction') return [this.auctionMessage(chatId)];
-          return [this.welcome(chatId, msg.from)];
-        default:
+          if (payload === 'auction') return [await this.auctionMessage(chatId, msg.from.id)];
           return [this.welcome(chatId, msg.from)];
       }
+      // An amount for the offer being answered, or an offer typed as in the groups.
+      const auctionReply = text.startsWith('/') ? null : await this.auction?.onText(chatId, msg.from.id, text);
+      return auctionReply ?? [this.welcome(chatId, msg.from)];
     }
 
     const cq = update.callback_query;
     if (cq?.message?.chat?.type === 'private') {
       const done = { method: 'answerCallbackQuery', callback_query_id: cq.id };
       const chatId = cq.message.chat.id;
+      if (cq.data?.startsWith('a:') && this.auction) return this.auction.onCallback(cq);
+      if (cq.data === 'auction') return [await this.auctionMessage(chatId, cq.from.id), done];
       if (cq.data === 'balance') return [await this.balanceMessage(chatId, cq.from.id), done];
       if (cq.data === 'balance:refresh') {
         return [{ ...(await this.balanceMessage(chatId, cq.from.id)), method: 'editMessageText', message_id: cq.message.message_id }, done];
@@ -229,14 +247,14 @@ export class Bot {
       chat_id: chatId,
       parse_mode: 'HTML',
       text: [
-        `سلام ${name}!`,
-        'به <b>مارکت‌بات</b> خوش آمدید؛ خرید و فروش ارز دیجیتال با تومان، همین‌جا در تلگرام.',
+        `سلام ${name} 👋`,
+        '<b>مارکت‌بات</b> · خرید و فروش ارز دیجیتال با تومان',
         '',
-        '• <b>بازار و محدود:</b> معامله با دفتر سفارش زنده',
-        '• <b>مزایده:</b> پیشنهاد قیمت خود را به کاربران دیگر بدهید',
-        '• <b>کیف پول:</b> شارژ آنلاین، موجودی و برداشت',
+        '🔨 <b>مزایده</b> — آگهی خرید و فروش، مثل گروه‌های تتر، همین‌جا در چت',
+        '💰 <b>موجودی</b> — کیف پول شما در یک نگاه',
+        '📱 <b>مینی‌اپ</b> — بازار و محدود با دفتر سفارش زنده، شارژ و برداشت',
         '',
-        'از دکمه‌های پایین صفحه استفاده کنید؛ دکمهٔ «مارکت‌بات» کنار کادر پیام هم برنامه را باز می‌کند.',
+        '<i>از دکمه‌های پایین شروع کنید.</i>',
       ].join('\n'),
       reply_markup: KEYBOARD,
     };
@@ -248,29 +266,26 @@ export class Bot {
     return {
       method: 'sendMessage',
       chat_id: chatId,
-      text: charge ? 'برای شارژ کیف پول دکمهٔ زیر را بزنید.' : 'برای باز کردن مارکت‌بات دکمهٔ زیر را بزنید.',
-      reply_markup: { inline_keyboard: [[{ text: charge ? '💳 شارژ کیف پول' : '🚀 باز کردن مارکت‌بات', style: 'primary', web_app: { url: this.appUrl(screen) } }]] },
+      text: charge ? 'کیف پول را از اینجا شارژ کنید:' : 'مارکت‌بات را از اینجا باز کنید:',
+      reply_markup: { inline_keyboard: [[{ text: charge ? 'شارژ کیف پول' : 'باز کردن مارکت‌بات', web_app: { url: this.appUrl(screen) } }]] },
     };
   }
 
-  auctionMessage(chatId) {
+  /** The auction's board right in the chat; without the auction, a button into the Mini App's. */
+  async auctionMessage(chatId, telegramId) {
+    if (this.auction) return { method: 'sendMessage', chat_id: chatId, parse_mode: 'HTML', ...(await this.auction.board(telegramId)) };
     return {
       method: 'sendMessage',
       chat_id: chatId,
-      parse_mode: 'HTML',
-      text: [
-        '<b>مزایده</b>',
-        'مثل گروه‌های خرید و فروش تتر، آگهی بگذارید: «من تتر را به قیمت … تومان با حجم … می‌خرم/می‌فروشم»، یا روی آگهی دیگران بزنید «از او می‌خرم» / «به او می‌فروشم».',
-        'معامله فقط بین کاربران است و پول و ارز هر دو طرف در کیف پول‌ها جابه‌جا می‌شود؛ نه کارت‌به‌کارت لازم است و نه واسطه. مبلغ آگهی شما تا انجام یا حذف آن مسدود می‌ماند.',
-      ].join('\n\n'),
-      reply_markup: { inline_keyboard: [[{ text: '🔨 ورود به مزایده', style: 'success', web_app: { url: this.appUrl('auction') } }]] },
+      text: 'مزایده را در مارکت‌بات ببینید:',
+      reply_markup: { inline_keyboard: [[{ text: 'ورود به مزایده', web_app: { url: this.appUrl('auction') } }]] },
     };
   }
 
   /** The user's balances, or how to get some: their exchange account comes with the first SMS code. */
   async balanceMessage(chatId, telegramId) {
     const reply = (text, keyboard) => ({ method: 'sendMessage', chat_id: chatId, parse_mode: 'HTML', text, reply_markup: { inline_keyboard: keyboard } });
-    const openApp = [{ text: '🚀 باز کردن مارکت‌بات', style: 'primary', web_app: { url: this.appUrl() } }];
+    const openApp = [{ text: 'ثبت‌نام در مارکت‌بات', web_app: { url: this.appUrl() } }];
 
     const { rows } = await this.pg.query('SELECT exchange_user_id, blocked_at FROM miniapp_users WHERE telegram_id = $1', [telegramId]);
     const user = rows[0];
@@ -294,18 +309,18 @@ export class Bot {
       const frozen = Number(b.frozen) > 0 ? ` <i>(مسدود: ${fa(b.frozen, digits)})</i>` : '';
       return `<b>${name}:</b> ${fa(b.available, digits)}${frozen}`;
     });
-    const time = new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' });
+    const time = new Date().toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const text = [
-      '<b>موجودی کیف پول</b>',
+      '<b>💰 موجودی کیف پول</b>',
       '',
       ...(lines.length ? lines : ['کیف پول شما خالی است.']),
-      ...(total > 0 ? ['', `ارزش کل: حدود ${fa(Math.round(total))} تومان`] : []),
+      ...(total > 0 ? ['', `ارزش کل: <b>حدود ${fa(Math.round(total))} تومان</b>`] : []),
       '',
-      `<i>به‌روز شده در ${time}</i>`,
+      `<i>به‌روز شده ${time}</i>`,
     ].join('\n');
     return reply(text, [
-      [{ text: '🔄 به‌روزرسانی', callback_data: 'balance:refresh' }, { text: '👛 کیف پول', web_app: { url: this.appUrl('wallet') } }],
-      [{ text: '💳 شارژ کیف پول', style: 'primary', web_app: { url: this.appUrl('charge') } }],
+      [{ text: 'شارژ کیف پول', web_app: { url: this.appUrl('charge') } }, { text: 'کیف پول', web_app: { url: this.appUrl('wallet') } }],
+      [{ text: '↻ به‌روزرسانی', callback_data: 'balance:refresh' }, { text: '🔨 مزایده', callback_data: 'auction' }],
     ]);
   }
 }
