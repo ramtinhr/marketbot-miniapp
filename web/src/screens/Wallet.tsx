@@ -94,6 +94,7 @@ function entryLabel(e: LedgerEntry): MessageKey {
 }
 const ENTRY_KEYS: Record<string, true> = Object.fromEntries(
     ['entry.credit.deposit', 'entry.freeze.withdrawal', 'entry.unfreeze.withdrawal', 'entry.debit.withdrawal',
+        'entry.freeze.auction_order', 'entry.unfreeze.auction_order', 'entry.trade.auction_trade',
         'entry.lock', 'entry.unlock', 'entry.trade', 'entry.opening', 'entry.credit', 'entry.debit', 'entry.freeze', 'entry.unfreeze']
         .map((k) => [k, true]),
 );

@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 
-import { api, ApiError, type Order, type Side } from '../../api';
+import { api, ApiError, type Depth, type Order, type Side } from '../../api';
+import { ActionSheet } from '../../components/ActionSheet';
 import { AmountInput, Segmented, Spinner, toast } from '../../components/ui';
-import { assetDigits, asciiNumber, baseOf, fmtAsset, fmtPrice, fmtToman, parseAmount, toAmount } from '../../format';
+import { assetDigits, asciiNumber, baseOf, fmtAsset, fmtPrice, fmtToman, num, parseAmount, toAmount } from '../../format';
 import { errorMessage, t } from '../../i18n';
 import { haptic, selection } from '../../telegram';
 import { balanceOf, useWallet } from '../../wallet';
 import { levelsFor, qtyForCost, walkBook, type MarketState, type Quote } from './market';
 
-export type OrderType = 'limit' | 'market';
+/** Limit and market go to the exchange; auction to the auction's own book. */
+export type OrderType = 'limit' | 'market' | 'auction';
+const TYPES: OrderType[] = ['market', 'limit', 'auction'];
 const PERCENTS = [25, 50, 75, 100];
 // A market buy is sent at a price a little past the book (the server's
 // slippage margin), and the engine holds that much Toman; leave room for it.
@@ -17,34 +20,42 @@ const MARKET_BUY_HEADROOM = 0.99;
 /** A price the form was told to use (a tapped book row); `n` makes a repeat tap count. */
 export interface PriceRequest { price: number; n: number }
 
-export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
+export function TradeForm({ symbol, s, quote, auctionDepth, digits, request, type, onType, onPlaced }: {
     symbol: string;
     s: MarketState;
     quote: Quote;
+    /** The auction's book, for an auction order's default price. */
+    auctionDepth: Depth | null;
     digits: number;
     request: PriceRequest | null;
-    onPlaced: (order: Order | null) => void;
+    type: OrderType;
+    onType: (type: OrderType) => void;
+    onPlaced: (order: Order | null, type: OrderType) => void;
 }) {
     const base = baseOf(symbol);
     const qtyDigits = Math.min(8, assetDigits(base));
     const { info } = useWallet();
     const [side, setSide] = useState<Side>('buy');
-    const [type, setType] = useState<OrderType>('limit');
+    const [sheetFor, setSheetFor] = useState<Side | null>(null);
     const [price, setPrice] = useState('');
     // Until the user types a price, the limit price follows the best one on the other side of the book.
     const [priceTouched, setPriceTouched] = useState(false);
     const [qty, setQty] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const auction = type === 'auction';
 
-    const best = side === 'buy' ? quote.bestAsk : quote.bestBid;
+    // An auction order follows the auction's own best price, or the market's while the auction has none.
+    const auctionBest = num((side === 'buy' ? auctionDepth?.asks : auctionDepth?.bids)?.[0]?.price);
+    const marketBest = side === 'buy' ? quote.bestAsk : quote.bestBid;
+    const best = auction ? auctionBest || marketBest : marketBest;
     useEffect(() => {
         if (!priceTouched) setPrice(best ? groupNumber(toAmount(best, digits)) : '');
     }, [best, priceTouched, digits]);
 
     useEffect(() => {
         if (!request) return;
-        setType('limit');
+        if (type === 'market') onType('limit');
         setPriceTouched(true);
         setPrice(groupNumber(toAmount(request.price, digits)));
         setError(null);
@@ -56,7 +67,7 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
     }, [symbol, side]);
     useEffect(() => {
         setPriceTouched(false);
-    }, [symbol]);
+    }, [symbol, auction]);
 
     const irt = balanceOf(info, 'IRT').available;
     const coin = balanceOf(info, base).available;
@@ -64,20 +75,27 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
     const qtyValue = parseAmount(qty, qtyDigits);
     const p = priceValue ? Number(priceValue) : 0;
     const q = qtyValue ? Number(qtyValue) : 0;
+    const priced = type !== 'market';
 
     const levels = levelsFor(s.depth, side);
     const walk = type === 'market' && q ? walkBook(levels, q) : null;
     const thin = walk !== null && walk.filled < q - 1e-12;
-    const total = type === 'limit' ? p * q : walk?.cost ?? 0;
+    const total = priced ? p * q : walk?.cost ?? 0;
     const avg = walk && walk.filled ? walk.cost / walk.filled : 0;
     const short = side === 'buy' ? total > irt + 1e-9 : q > coin + 1e-12;
+
+    const choose = (nextSide: Side, nextType: OrderType) => {
+        setSide(nextSide);
+        if (nextType !== type) onType(nextType);
+        setError(null);
+    };
 
     const fillPercent = (pct: number) => {
         selection();
         setError(null);
         let amount = 0;
         if (side === 'sell') amount = (coin * pct) / 100;
-        else if (type === 'limit') amount = p ? (irt * pct) / 100 / p : 0;
+        else if (priced) amount = p ? (irt * pct) / 100 / p : 0;
         else amount = qtyForCost(levels, ((irt * pct) / 100) * MARKET_BUY_HEADROOM);
         setQty(groupNumber(toAmount(amount, qtyDigits)));
     };
@@ -85,7 +103,7 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
     const submit = async () => {
         if (busy) return;
         const problem = !qtyValue ? 'invalid_quantity'
-            : type === 'limit' && !priceValue ? 'invalid_price'
+            : priced && !priceValue ? 'invalid_price'
                 : type === 'market' && (!levels.length || thin) ? 'insufficient_liquidity'
                     : short ? 'insufficient_balance' : null;
         if (problem) {
@@ -96,17 +114,21 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
         setBusy(true);
         setError(null);
         try {
-            const placed = await api.placeOrder({ symbol, side, type, quantity: qtyValue as string, ...(type === 'limit' ? { price: priceValue as string } : {}) });
+            const placed = auction
+                ? await api.placeAuctionOrder({ symbol, side, price: priceValue as string, quantity: qtyValue as string })
+                : await api.placeOrder({ symbol, side, type, quantity: qtyValue as string, ...(type === 'limit' ? { price: priceValue as string } : {}) });
             haptic('success');
             const o = placed.order;
             const filled = o ? Number(o.filled_quantity) : 0;
             if (o?.status === 'filled' || (type === 'market' && filled > 0)) {
                 toast(t(side === 'buy' ? 'trade.bought' : 'trade.sold', { qty: fmtAsset(filled, base, { trim: true }), base }));
+            } else if (auction && filled > 0) {
+                toast(t('auction.partly', { qty: fmtAsset(filled, base, { trim: true }), base }));
             } else {
-                toast(t('trade.placed'));
+                toast(t(auction ? 'auction.placed' : 'trade.placed'));
             }
             setQty('');
-            onPlaced(o);
+            onPlaced(o, type);
         } catch (err) {
             haptic('error');
             setError(err instanceof ApiError ? err.code : 'unknown');
@@ -116,26 +138,26 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
     };
 
     return (
-        <section className="panel tf">
+        <section className={`panel tf ${auction ? 'auction' : ''}`}>
             <Segmented
                 className="sides"
                 value={side}
-                onChange={setSide}
+                onChange={(v) => setSheetFor(v)}
                 options={[
                     { value: 'buy', label: t('trade.buy'), tone: 'buy' },
                     { value: 'sell', label: t('trade.sell'), tone: 'sell' },
                 ]}
             />
             <div className="tf-types" role="tablist">
-                {(['limit', 'market'] as OrderType[]).map((ty) => (
+                {TYPES.map((ty) => (
                     <button key={ty} type="button" role="tab" aria-selected={type === ty} className={type === ty ? 'active' : ''}
-                            onClick={() => { selection(); setType(ty); setError(null); }}>
+                            onClick={() => { selection(); choose(side, ty); }}>
                         {t(`trade.${ty}`)}
                     </button>
                 ))}
             </div>
 
-            {type === 'limit' ? (
+            {priced ? (
                 <AmountInput
                     id="tf-price"
                     label={t('trade.price')}
@@ -148,7 +170,7 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
                             {side === 'buy' ? t('trade.bestAsk') : t('trade.bestBid')}
                         </button>
                     }
-                    hint={!priceTouched && best ? t('trade.followsBest') : undefined}
+                    hint={!priceTouched && best ? t(auction && !auctionBest ? 'auction.followsMarket' : 'trade.followsBest') : undefined}
                 />
             ) : (
                 <div className="tf-market-price">
@@ -191,12 +213,24 @@ export function TradeForm({ symbol, s, quote, digits, request, onPlaced }: {
             </dl>
 
             {type === 'market' && <p className="tf-note">{thin ? t('trade.thin') : t('trade.marketNote')}</p>}
+            {auction && <p className="tf-note">{t('auction.note')}</p>}
             {error && <p className="tf-error" role="alert">{errorMessage(error)}</p>}
 
             <button type="button" className={`button ${side}`} onClick={submit} disabled={busy} aria-busy={busy}>
                 {busy && <Spinner small />}
-                {t(side === 'buy' ? 'trade.submitBuy' : 'trade.submitSell', { base })}
+                {t(auction ? (side === 'buy' ? 'auction.submitBuy' : 'auction.submitSell') : side === 'buy' ? 'trade.submitBuy' : 'trade.submitSell', { base })}
             </button>
+
+            {sheetFor && (
+                <ActionSheet
+                    title={t(sheetFor === 'buy' ? 'trade.submitBuy' : 'trade.submitSell', { base })}
+                    message={t('trade.pickType')}
+                    value={sheetFor === side ? type : undefined}
+                    options={TYPES.map((ty) => ({ value: ty, label: t(`trade.${ty}`), description: t(`trade.${ty}Desc`) }))}
+                    onSelect={(ty) => choose(sheetFor, ty)}
+                    onClose={() => setSheetFor(null)}
+                />
+            )}
         </section>
     );
 }

@@ -671,6 +671,76 @@ button.balance-card { cursor: pointer; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 10px; }
 @keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
 
+/* ---- Action sheet: iOS's, choices grouped above a separate Cancel ---- */
+
+.as-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgb(0 0 0 / .4);
+    animation: fade .25s;
+}
+.as {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 480px;
+    padding: 0 8px calc(8px + var(--safe-bottom));
+    animation: as-up .4s cubic-bezier(.32, .72, 0, 1);
+}
+.as-group, .as-cancel {
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+}
+.as-group { overflow: hidden; }
+.as-header { padding: 14px 16px 12px; text-align: center; color: var(--hint); font-size: .8rem; line-height: 1.5; }
+.as-header strong { display: block; font-size: .85rem; font-weight: 700; }
+.as-header p { margin-top: 2px; }
+.as-option {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    width: 100%;
+    min-height: 58px;
+    padding: 9px 48px;
+    border: 0;
+    border-top: .5px solid var(--separator);
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+    transition: background .12s;
+}
+.as-group > .as-option:first-child { border-top: 0; }
+.as-option:active, .as-cancel:active { background: color-mix(in srgb, var(--hint) 22%, var(--surface)); }
+.as-label { font-size: 1.12rem; font-weight: 500; }
+.as-option.current .as-label { font-weight: 700; }
+.as-desc { color: var(--hint); font-size: .74rem; }
+.as-check { position: absolute; inset-inline-end: 16px; top: 50%; width: 20px; height: 20px; transform: translateY(-50%); }
+.as-cancel {
+    min-height: 58px;
+    border: 0;
+    color: var(--accent);
+    font: inherit;
+    font-size: 1.12rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.as-backdrop.as-closing { animation: fade-out .22s forwards; }
+.as-closing .as { animation: as-down .22s ease-in forwards; }
+@keyframes as-up { from { transform: translateY(100%); } }
+@keyframes as-down { to { transform: translateY(100%); } }
+@keyframes fade-out { to { opacity: 0; } }
+
 /* ---- Trade: the dashboard's market page, phone-sized ---- */
 
 .screen.trade { gap: 12px; padding-top: calc(14px + var(--safe-top)); }
@@ -758,6 +828,9 @@ button.balance-card { cursor: pointer; }
 .ob-ratio-bar i { display: block; border-radius: 2px; transition: width .25s ease; }
 .ob-ratio-bar .bid { background: var(--up); }
 .ob-ratio-bar .ask { background: var(--down); }
+.panel-head h2 { display: flex; align-items: center; gap: 8px; }
+.mode-tag { padding: 1px 8px; border-radius: 6px; font-size: .7rem; font-weight: 800; color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+.ob.auction, .tf.auction { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--warning) 35%, transparent); }
 .ob-view-icon { display: flex; flex-direction: column; gap: 2px; width: 14px; }
 .ob-view-icon i { height: 5px; border-radius: 1.5px; }
 .ob-view-icon.both i:first-child, .ob-view-icon.asks i { background: var(--down); }

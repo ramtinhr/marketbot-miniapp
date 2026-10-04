@@ -11,10 +11,14 @@
 
 import { exchangeDbError, httpError } from './errors.js';
 
+// `kind` is what the ledger calls the movement, when it differs from its name here.
 const MOVES = {
   credit: { set: 'available = available + $3', where: "status <> 'closed'", deltas: { available: 1 } },
   freeze: { set: 'available = available - $3, frozen = frozen + $3', where: "status = 'active' AND available >= $3", deltas: { available: -1, frozen: 1 } },
   unfreeze: { set: 'frozen = frozen - $3, available = available + $3', where: "status <> 'closed' AND frozen >= $3", deltas: { available: 1, frozen: -1 } },
+  // An auction fill: the payer's side leaves frozen, the receiver's arrives in available.
+  settle: { kind: 'trade', set: 'frozen = frozen - $3', where: "status <> 'closed' AND frozen >= $3", deltas: { frozen: -1 } },
+  receive: { kind: 'trade', set: 'available = available + $3', where: "status <> 'closed'", deltas: { available: 1 }, creates: true },
 };
 
 const BALANCE_COLUMNS = 'asset, status, available, frozen, locked, updated_at';
@@ -93,7 +97,7 @@ export class Wallets {
       const user = await c.query('SELECT status FROM exchange.users WHERE id = $1 FOR SHARE', [exchangeUserId]);
       if (!user.rows.length) throw httpError(409, 'unknown_user', 'no such exchange user');
       if (user.rows[0].status === 'closed') throw httpError(409, 'user_inactive', 'the exchange account is closed');
-      if (kind === 'credit') {
+      if (kind === 'credit' || move.creates) {
         await c.query('INSERT INTO exchange.wallets (user_id, asset) VALUES ($1, $2) ON CONFLICT (user_id, asset) DO NOTHING', [
           exchangeUserId,
           asset,
@@ -119,7 +123,7 @@ export class Wallets {
          VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING id`,
         [
-          w.id, exchangeUserId, asset, kind, amount, delta(move.deltas.available), delta(move.deltas.frozen),
+          w.id, exchangeUserId, asset, move.kind ?? kind, amount, delta(move.deltas.available), delta(move.deltas.frozen),
           w.available, w.frozen, w.locked, referenceType, referenceId, reason, actor, idempotencyKey,
         ],
       );

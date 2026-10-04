@@ -7,7 +7,7 @@
 // tables here only reference them, without foreign keys, so the app starts
 // whether or not the engine has created its schema yet.
 
-export const SCHEMA = `
+const CORE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS miniapp_users (
   id            BIGSERIAL PRIMARY KEY,
   telegram_id   BIGINT NOT NULL UNIQUE,
@@ -88,6 +88,50 @@ CREATE TABLE IF NOT EXISTS miniapp_withdrawals (
 );
 CREATE INDEX IF NOT EXISTS miniapp_withdrawals_user_idx ON miniapp_withdrawals (user_id, created_at DESC);
 `;
+
+export const AUCTION_SCHEMA = `
+-- The auction: users' limit orders on a book of their own, matched only with
+-- each other, never with venue liquidity or the engine's book. What an open
+-- order still holds (Toman at its limit for a buy, the coin for a sell) is
+-- frozen in the exchange wallet and tracked in "held".
+CREATE TABLE IF NOT EXISTS miniapp_auction_orders (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq              BIGSERIAL,
+  exchange_user_id UUID NOT NULL,
+  symbol           TEXT NOT NULL,
+  side             TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+  price            NUMERIC(36,18) NOT NULL CHECK (price > 0),
+  quantity         NUMERIC(36,18) NOT NULL CHECK (quantity > 0),
+  filled_quantity  NUMERIC(36,18) NOT NULL DEFAULT 0 CHECK (filled_quantity >= 0),
+  filled_quote     NUMERIC(36,18) NOT NULL DEFAULT 0 CHECK (filled_quote >= 0),
+  held             NUMERIC(36,18) NOT NULL DEFAULT 0 CHECK (held >= 0),
+  status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'filled', 'cancelled')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS miniapp_auction_orders_book_idx ON miniapp_auction_orders (symbol, side, price, seq)
+  WHERE status IN ('open', 'partial');
+CREATE INDEX IF NOT EXISTS miniapp_auction_orders_user_idx ON miniapp_auction_orders (exchange_user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS miniapp_auction_trades (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq           BIGSERIAL,
+  symbol        TEXT NOT NULL,
+  price         NUMERIC(36,18) NOT NULL CHECK (price > 0),
+  quantity      NUMERIC(36,18) NOT NULL CHECK (quantity > 0),
+  taker_side    TEXT NOT NULL CHECK (taker_side IN ('buy', 'sell')),
+  buy_order_id  UUID NOT NULL,
+  sell_order_id UUID NOT NULL,
+  buy_user_id   UUID NOT NULL,
+  sell_user_id  UUID NOT NULL,
+  executed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS miniapp_auction_trades_symbol_idx ON miniapp_auction_trades (symbol, seq DESC);
+CREATE INDEX IF NOT EXISTS miniapp_auction_trades_buyer_idx ON miniapp_auction_trades (buy_user_id, seq DESC);
+CREATE INDEX IF NOT EXISTS miniapp_auction_trades_seller_idx ON miniapp_auction_trades (sell_user_id, seq DESC);
+`;
+
+export const SCHEMA = CORE_SCHEMA + AUCTION_SCHEMA;
 
 /** Applies SCHEMA once per pool; a failure is retried on the next call. */
 export function schemaReady(pg) {

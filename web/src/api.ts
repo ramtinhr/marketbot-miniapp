@@ -61,6 +61,11 @@ export interface Order {
 }
 export interface PlacedOrder { order: Order | null; trades: MarketTrade[]; type: 'limit' | 'market' }
 
+/** The auction's own book: users' orders only, `orders` resting at each price. */
+export interface AuctionLevel { price: string; quantity: string; orders: number }
+export interface AuctionBook { symbol: string; bids: AuctionLevel[]; asks: AuctionLevel[]; last_price: string }
+export interface AuctionMarket { symbol: string; book: AuctionBook; trades: MarketTrade[] }
+
 /** The server answered with an error; `code` picks the message the app shows. */
 export class ApiError extends Error {
     constructor(readonly status: number, readonly code: string, message: string, readonly data: Record<string, unknown> = {}) {
@@ -144,4 +149,11 @@ export const api = {
     placeOrder: (body: { symbol: string; side: Side; type: 'limit' | 'market'; price?: string; quantity: string }) =>
         post<PlacedOrder>('/orders', body),
     cancelOrder: (id: string) => post<{ order: Order | null }>(`/orders/${id}/cancel`),
+
+    auction: (symbol: string) => request<AuctionMarket>(`/auction/${symbol}`),
+    auctionOrders: (symbol: string | null, scope: 'open' | 'history' | 'all' = 'open') =>
+        request<{ orders: Order[] }>(`/auction/orders${query({ symbol, scope })}`),
+    placeAuctionOrder: (body: { symbol: string; side: Side; price: string; quantity: string }) =>
+        post<{ order: Order; trades: MarketTrade[] }>('/auction/orders', body),
+    cancelAuctionOrder: (id: string) => post<{ order: Order | null }>(`/auction/orders/${id}/cancel`),
 };

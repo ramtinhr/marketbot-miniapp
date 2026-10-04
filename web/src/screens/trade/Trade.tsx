@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, ApiError, type Order } from '../../api';
+import { api, ApiError, type MarketTrade, type Order } from '../../api';
 import { ChevronDownIcon, XIcon } from '../../components/icons';
 import { CoinIcon, Empty, Segmented, toast } from '../../components/ui';
 import { assetName, baseOf, fmtAsset, fmtDateTime, fmtPercent, fmtPrice, fmtTime, num, priceDigits } from '../../format';
 import { errorMessage, t } from '../../i18n';
 import { useBackHandler, useNav } from '../../nav';
 import { confirm, haptic, selection } from '../../telegram';
-import { quoteOf, useMarket, type MarketState } from './market';
+import { useAuction } from './auction';
+import { quoteFrom, quoteOf, useMarket, type MarketState } from './market';
 import { OrderBook } from './OrderBook';
-import { TradeForm, type PriceRequest } from './TradeForm';
+import { TradeForm, type OrderType, type PriceRequest } from './TradeForm';
 
 function PairSheet({ symbols, current, onPick, onClose }: { symbols: string[]; current: string; onPick: (s: string) => void; onClose: () => void }) {
     useBackHandler(onClose);
@@ -79,9 +80,9 @@ function Ticker({ symbol, s, digits, onPair }: { symbol: string; s: MarketState;
     );
 }
 
-function MarketTrades({ symbol, s, digits }: { symbol: string; s: MarketState; digits: number }) {
+function MarketTrades({ symbol, trades, fresh, digits }: { symbol: string; trades: MarketTrade[]; fresh: Set<string>; digits: number }) {
     const base = baseOf(symbol);
-    if (!s.trades.length) return <Empty text={t('trades.empty')} />;
+    if (!trades.length) return <Empty text={t('trades.empty')} />;
     return (
         <div className="trades">
             <div className="tr-head">
@@ -89,8 +90,8 @@ function MarketTrades({ symbol, s, digits }: { symbol: string; s: MarketState; d
                 <span>{t('book.amount', { base })}</span>
                 <span>{t('trades.time')}</span>
             </div>
-            {s.trades.map((tr) => (
-                <div key={tr.id} className={`tr-row ${tr.taker_side} ${s.fresh.has(tr.id) ? 'flash' : ''}`}>
+            {trades.map((tr) => (
+                <div key={tr.id} className={`tr-row ${tr.taker_side} ${fresh.has(tr.id) ? 'flash' : ''}`}>
                     <span className="ob-price">{fmtPrice(tr.price, digits)}</span>
                     <span>{fmtAsset(tr.quantity, base)}</span>
                     <span className="ob-dim">{fmtTime(tr.executed_at)}</span>
@@ -100,7 +101,11 @@ function MarketTrades({ symbol, s, digits }: { symbol: string; s: MarketState; d
     );
 }
 
-function OpenOrders({ symbol, orders, digits, onCancelled }: { symbol: string; orders: Order[]; digits: number; onCancelled: (o: Order | null) => void }) {
+function OpenOrders({ symbol, orders, digits, cancelOrder, onCancelled }: {
+    symbol: string; orders: Order[]; digits: number;
+    cancelOrder: (id: string) => Promise<{ order: Order | null }>;
+    onCancelled: (o: Order | null) => void;
+}) {
     const base = baseOf(symbol);
     const [cancelling, setCancelling] = useState<string | null>(null);
     if (!orders.length) return <Empty text={t('orders.empty')} />;
@@ -108,7 +113,7 @@ function OpenOrders({ symbol, orders, digits, onCancelled }: { symbol: string; o
         if (!(await confirm(t('orders.cancelConfirm')))) return;
         setCancelling(o.id);
         try {
-            const res = await api.cancelOrder(o.id);
+            const res = await cancelOrder(o.id);
             haptic('success');
             toast(t('orders.cancelled'));
             onCancelled(res.order ?? { ...o, status: 'cancelled' });
@@ -152,14 +157,19 @@ export function TradePage() {
     const [picking, setPicking] = useState(false);
     const [request, setRequest] = useState<PriceRequest | null>(null);
     const [tab, setTab] = useState<'orders' | 'trades'>('orders');
+    const [type, setType] = useState<OrderType>('limit');
+    const auctionMode = type === 'auction';
 
     const onFill = useCallback((o: Order) => {
         haptic('success');
         toast(t('orders.filledToast', { side: t(o.side === 'buy' ? 'trade.buy' : 'trade.sell'), qty: fmtAsset(o.quantity, baseOf(o.symbol), { trim: true }), base: baseOf(o.symbol) }));
     }, []);
     const { s, applyOrder } = useMarket(symbol, onFill);
+    const { auction, applyAuctionOrder } = useAuction(symbol, auctionMode, onFill);
     const quote = quoteOf(s);
-    const digits = priceDigits(quote.bestAsk || quote.bestBid || quote.last || 0);
+    const auctionQuote = quoteFrom(auction.book, auction.trades);
+    const digits = priceDigits(quote.bestAsk || quote.bestBid || quote.last || auctionQuote.mid || 0);
+    const orders = auctionMode ? auction.orders : s.orders;
 
     useEffect(() => {
         api.symbols().then((r) => setSymbols(r.symbols)).catch(() => {});
@@ -168,23 +178,41 @@ export function TradePage() {
     return (
         <main className="screen tabbed wide trade enter">
             <Ticker symbol={symbol} s={s} digits={digits} onPair={() => { selection(); setPicking(true); }} />
-            {s.error && <p className="tf-error">{errorMessage(s.error)}</p>}
+            {(auctionMode ? auction.error : s.error) && <p className="tf-error">{errorMessage((auctionMode ? auction.error : s.error) as string)}</p>}
 
             <div className="trade-grid">
-                <OrderBook symbol={symbol} s={s} quote={quote} digits={digits} onPick={(_side, price) => setRequest({ price, n: Date.now() })} />
-                <TradeForm symbol={symbol} s={s} quote={quote} digits={digits} request={request} onPlaced={applyOrder} />
+                {auctionMode ? (
+                    <OrderBook
+                        symbol={symbol} depth={auction.book} orders={auction.orders} loading={auction.loading} direction={auction.direction}
+                        quote={auctionQuote} digits={digits} auction onPick={(_side, price) => setRequest({ price, n: Date.now() })}
+                    />
+                ) : (
+                    <OrderBook
+                        symbol={symbol} depth={s.depth} orders={s.orders} loading={s.loading} direction={s.direction}
+                        quote={quote} digits={digits} onPick={(_side, price) => setRequest({ price, n: Date.now() })}
+                    />
+                )}
+                <TradeForm
+                    symbol={symbol} s={s} quote={quote} auctionDepth={auction.book} digits={digits} request={request}
+                    type={type} onType={setType}
+                    onPlaced={(o, placedType) => (placedType === 'auction' ? applyAuctionOrder(o) : applyOrder(o))}
+                />
                 <section className="panel lists">
                     <Segmented
                         value={tab}
                         onChange={setTab}
                         options={[
-                            { value: 'orders', label: s.orders.length ? t('orders.titleCount', { n: fmtAsset(s.orders.length, 'IRT') }) : t('orders.title') },
+                            { value: 'orders', label: orders.length ? t('orders.titleCount', { n: fmtAsset(orders.length, 'IRT') }) : t('orders.title') },
                             { value: 'trades', label: t('trades.title') },
                         ]}
                     />
                     {tab === 'orders'
-                        ? <OpenOrders symbol={symbol} orders={s.orders} digits={digits} onCancelled={applyOrder} />
-                        : <MarketTrades symbol={symbol} s={s} digits={digits} />}
+                        ? auctionMode
+                            ? <OpenOrders symbol={symbol} orders={auction.orders} digits={digits} cancelOrder={api.cancelAuctionOrder} onCancelled={applyAuctionOrder} />
+                            : <OpenOrders symbol={symbol} orders={s.orders} digits={digits} cancelOrder={api.cancelOrder} onCancelled={applyOrder} />
+                        : auctionMode
+                            ? <MarketTrades symbol={symbol} trades={auction.trades} fresh={auction.fresh} digits={digits} />
+                            : <MarketTrades symbol={symbol} trades={s.trades} fresh={s.fresh} digits={digits} />}
                 </section>
             </div>
 

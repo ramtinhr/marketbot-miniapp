@@ -2,7 +2,7 @@
 // with a book that moves and trades that print, so every screen can be seen
 // and worked on in a browser without Telegram, Kafka or the engine.
 
-import type { Balance, Depth, DepthLevel, MarketTrade, Order, Payment, Withdrawal } from './api';
+import type { AuctionBook, Balance, Depth, DepthLevel, MarketTrade, Order, Payment, Withdrawal } from './api';
 import { useTransport, type Transport } from './live';
 
 const MIDS: Record<string, number> = {
@@ -64,6 +64,36 @@ function tradesOf(symbol: string): MarketTrade[] {
     }
     return trades[symbol];
 }
+
+// The auction: other users' offers around the mid, and the user's own. Not matched here.
+const auctionOthers: Record<string, Order[]> = {};
+const auctionMine: Order[] = [];
+function auctionOffers(symbol: string): Order[] {
+    if (!auctionOthers[symbol]) {
+        const mid = MIDS[symbol];
+        const offer = (side: Order['side'], pct: number, qty: number): Order => ({
+            id: id(), symbol, side, price: String(+(mid * (1 + pct / 100)).toFixed(mid > 1000 ? 0 : 4)),
+            quantity: (qty * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2), filled_quantity: '0', status: 'open', created_at: now(),
+        });
+        auctionOthers[symbol] = [
+            offer('sell', 0.4, 120), offer('sell', 0.4, 60), offer('sell', 0.9, 300), offer('sell', 1.6, 75),
+            offer('buy', -0.5, 200), offer('buy', -1.1, 90), offer('buy', -1.1, 140), offer('buy', -2, 500),
+        ];
+    }
+    return [...auctionOthers[symbol], ...auctionMine.filter((o) => o.symbol === symbol)];
+}
+function auctionBook(symbol: string): AuctionBook {
+    const levels = (side: Order['side'], dir: number) => {
+        const by = new Map<string, { quantity: number; orders: number }>();
+        for (const o of auctionOffers(symbol).filter((x) => x.side === side)) {
+            const l = by.get(o.price) ?? { quantity: 0, orders: 0 };
+            by.set(o.price, { quantity: l.quantity + Number(o.quantity) - Number(o.filled_quantity), orders: l.orders + 1 });
+        }
+        return [...by].sort((a, b) => dir * (Number(a[0]) - Number(b[0]))).map(([price, l]) => ({ price, quantity: String(l.quantity), orders: l.orders }));
+    };
+    return { symbol, bids: levels('buy', -1), asks: levels('sell', 1), last_price: '' };
+}
+let liveSocket: FakeSocket | null = null;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -137,6 +167,25 @@ async function route(method: string, path: string, body: Record<string, unknown>
         if (o.status === 'open') orders.unshift(o);
         return json({ order: o, trades: [], type: body.type }, 201);
     }
+    if (p === '/auction/orders' && method === 'GET') return json({ orders: auctionMine.filter((o) => o.symbol === (q.get('symbol') ?? o.symbol)) });
+    if (p === '/auction/orders') {
+        const o: Order = {
+            id: id(), symbol: String(body.symbol), side: body.side as Order['side'], price: String(body.price), quantity: String(body.quantity),
+            filled_quantity: '0', status: 'open', created_at: now(),
+        };
+        auctionMine.unshift(o);
+        liveSocket?.push({ type: 'auction_book', book: auctionBook(o.symbol) });
+        return json({ order: o, trades: [] }, 201);
+    }
+    const cancelA = /^\/auction\/orders\/(.+)\/cancel$/.exec(p);
+    if (cancelA) {
+        const i = auctionMine.findIndex((o) => o.id === cancelA[1]);
+        const [o] = i >= 0 ? auctionMine.splice(i, 1) : [];
+        if (o) liveSocket?.push({ type: 'auction_book', book: auctionBook(o.symbol) });
+        return json({ order: o ? { ...o, status: 'cancelled' } : null });
+    }
+    const auction = /^\/auction\/([A-Z0-9]+_IRT)$/.exec(p);
+    if (auction) return json({ symbol: auction[1], book: auctionBook(auction[1]), trades: [] });
     const cancelO = /^\/orders\/(.+)\/cancel$/.exec(p);
     if (cancelO) {
         const i = orders.findIndex((o) => o.id === cancelO[1]);
@@ -156,10 +205,15 @@ class FakeSocket implements Transport {
     constructor() {
         setTimeout(() => this.onopen?.(), 50);
         this.timer = setInterval(() => this.tick(), 1400);
+        liveSocket = this;
     }
 
     private emit(msg: unknown) {
         this.onmessage?.({ data: JSON.stringify(msg) });
+    }
+
+    push(msg: unknown) {
+        this.emit(msg);
     }
 
     private tick() {
@@ -189,6 +243,7 @@ class FakeSocket implements Transport {
 
     close() {
         clearInterval(this.timer);
+        if (liveSocket === this) liveSocket = null;
     }
 }
 

@@ -1,11 +1,11 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 
-import type { DepthLevel, Order } from '../../api';
+import type { Depth, DepthLevel, Order } from '../../api';
 import { Segmented } from '../../components/ui';
 import { baseOf, fmtAsset, fmtPercent, fmtPrice, fmtToman, num } from '../../format';
 import { t } from '../../i18n';
 import { selection } from '../../telegram';
-import { cumulative, type MarketState, type Quote } from './market';
+import { cumulative, type Quote } from './market';
 
 type View = 'both' | 'bids' | 'asks';
 type BookSide = 'bid' | 'ask';
@@ -36,24 +36,29 @@ function ViewIcon({ view }: { view: View }) {
     return <span className={`ob-view-icon ${view}`} aria-hidden="true"><i /><i /></span>;
 }
 
-/** The book as on the dashboard's market page: asks above the spread, bids below, depth behind each row. */
-export function OrderBook({ symbol, s, quote, digits, onPick }: {
-    symbol: string; s: MarketState; quote: Quote; digits: number; onPick: (side: BookSide, price: number) => void;
+/**
+ * The book as on the dashboard's market page: asks above the spread, bids
+ * below, depth behind each row. The exchange's book, or in auction mode the
+ * auction's.
+ */
+export function OrderBook({ symbol, depth, orders, loading, direction, quote, digits, auction = false, onPick }: {
+    symbol: string; depth: Depth | null; orders: Order[]; loading: boolean; direction: number; quote: Quote; digits: number;
+    auction?: boolean; onPick: (side: BookSide, price: number) => void;
 }) {
     const [view, setView] = useState<View>('both');
     const base = baseOf(symbol);
     const rows = view === 'both' ? ROWS : ROWS * 2;
-    const minePrices = (side: 'buy' | 'sell') => new Set(s.orders.filter((o: Order) => o.side === side).map((o) => num(o.price)));
+    const minePrices = (side: 'buy' | 'sell') => new Set(orders.filter((o) => o.side === side).map((o) => num(o.price)));
 
     let asksBody: ReactNode = null;
     let bidsBody: ReactNode = null;
     let ratio: number | null = null;
-    const empty = <div className="ob-empty">{t('book.empty')}</div>;
-    if (!s.depth) {
-        asksBody = <div className="ob-empty">{s.loading ? t('book.loading') : t('book.waiting')}</div>;
+    const empty = <div className="ob-empty">{t(auction ? 'auction.bookEmpty' : 'book.empty')}</div>;
+    if (!depth) {
+        asksBody = <div className="ob-empty">{loading ? t('book.loading') : t('book.waiting')}</div>;
     } else {
-        const asks = s.depth.asks.slice(0, rows);
-        const bids = s.depth.bids.slice(0, rows);
+        const asks = depth.asks.slice(0, rows);
+        const bids = depth.bids.slice(0, rows);
         const askCum = cumulative(asks);
         const bidCum = cumulative(bids);
         const askTotal = askCum.at(-1) ?? 0;
@@ -76,12 +81,15 @@ export function OrderBook({ symbol, s, quote, digits, onPick }: {
     }
 
     const headline = quote.last ?? quote.mid;
-    const dir = s.direction > 0 ? 'up' : s.direction < 0 ? 'down' : '';
+    const dir = direction > 0 ? 'up' : direction < 0 ? 'down' : '';
 
     return (
-        <section className="panel ob">
+        <section className={`panel ob ${auction ? 'auction' : ''}`}>
             <div className="panel-head">
-                <h2>{t('book.title')}</h2>
+                <h2>
+                    {t(auction ? 'auction.bookTitle' : 'book.title')}
+                    {auction && <span className="mode-tag">{t('trade.auction')}</span>}
+                </h2>
                 <Segmented
                     className="small icons"
                     value={view}

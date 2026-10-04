@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { Auction } from './auction.js';
 import { config } from './config.js';
 import { createPool } from './db.js';
 import { ExchangeBridge } from './exchange.js';
@@ -24,9 +25,15 @@ if (config.production) {
     }),
     ...(config.payments.provider === 'zarinpal' && { ZARINPAL_MERCHANT_ID: config.payments.zarinpalMerchantId }),
   };
+  const problems = [];
   const missing = Object.keys(required).filter((k) => !required[k]);
-  if (missing.length) {
-    process.stderr.write(`${JSON.stringify({ level: 'error', time: Date.now(), msg: `NODE_ENV=production needs ${missing.join(', ')} in .env` })}\n`);
+  if (missing.length) problems.push(`set ${missing.join(', ')}`);
+  // Codes in the log would let anyone who reads it sign in as anyone, and the
+  // fake gateway credits wallets without money.
+  if (config.sms.provider !== 'kavenegar') problems.push(`SMS_PROVIDER must be kavenegar, not "${config.sms.provider}"`);
+  if (config.payments.provider !== 'zarinpal') problems.push(`PAYMENT_PROVIDER must be zarinpal, not "${config.payments.provider}"`);
+  if (problems.length) {
+    process.stderr.write(`${JSON.stringify({ level: 'error', time: Date.now(), msg: `NODE_ENV=production: ${problems.join('; ')} - in .env (MINIAPP_ENV)` })}\n`);
     process.exit(1);
   }
 }
@@ -53,7 +60,8 @@ const payments = new Payments(pg, wallets, createGateway(config.payments, config
 const withdrawals = new Withdrawals(pg, wallets);
 const exchange = new ExchangeBridge({ brokers: config.exchange.brokers, clientId: config.exchange.clientId, log: bootLog });
 const trading = new Trading({ pg, exchange, slippageBps: config.exchange.marketSlippageBps, log: bootLog });
-const hub = new Hub({ exchange, pg, log: bootLog });
+const auction = new Auction({ pg, wallets, log: bootLog });
+const hub = new Hub({ exchange, auction, pg, log: bootLog });
 const photos = new TelegramPhotos({ botToken: config.auth.botToken, ...config.telegram, log: bootLog });
 
 const app = await buildApp({
@@ -63,6 +71,7 @@ const app = await buildApp({
   payments,
   withdrawals,
   trading,
+  auction,
   hub,
   photos,
   botUsername: config.botUsername,

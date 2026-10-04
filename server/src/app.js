@@ -38,10 +38,10 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  * @param {{ users: import('./store.js').UserStore, otp?: import('./otp.js').OtpService,
  *           wallets?: import('./wallets.js').Wallets, payments?: import('./payments.js').Payments,
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
- *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
+ *           auction?: import('./auction.js').Auction, hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
  *           botUsername?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, hub, photos, botUsername = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, hub, photos, botUsername = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -311,6 +311,32 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
         });
 
         api.post('/orders/:id/cancel', { preHandler: requireVerified }, async (req) => trading.cancel(req.session.exchangeUserId, req.params.id));
+      }
+
+      // ---- Auction: users' own book, matched with each other only ------------
+
+      if (auction) {
+        api.get('/auction/orders', { preHandler: requireVerified }, async (req) => {
+          const symbol = req.query.symbol && isSymbol(req.query.symbol) ? req.query.symbol : null;
+          const scope = ['open', 'history', 'all'].includes(req.query.scope) ? req.query.scope : 'open';
+          return { orders: await auction.orders(req.session.exchangeUserId, { symbol, scope }) };
+        });
+
+        api.post('/auction/orders', { preHandler: requireVerified }, async (req, reply) => {
+          const placed = await auction.place(req.session.exchangeUserId, req.body, { actor: `miniapp:${req.user.id}` });
+          req.log.info({ user: req.user.id, order: placed.order.id, status: placed.order.status, fills: placed.trades.length }, 'auction order placed');
+          return reply.code(201).send(placed);
+        });
+
+        api.post('/auction/orders/:id/cancel', { preHandler: requireVerified }, async (req) =>
+          auction.cancel(req.session.exchangeUserId, req.params.id, { actor: `miniapp:${req.user.id}` }));
+
+        api.get('/auction/:symbol', async (req) => {
+          const { symbol } = req.params;
+          if (!isSymbol(symbol)) throw httpError(404, 'not_found', 'unknown symbol');
+          const [book, trades] = await Promise.all([auction.book(symbol), auction.trades(symbol)]);
+          return { symbol, book, trades };
+        });
       }
 
       // Client -> server: {"type":"auth","token":"..."} (optional, for the

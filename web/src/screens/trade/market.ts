@@ -25,7 +25,7 @@ const empty = (): MarketState => ({
     depth: null, summary: null, trades: [], fresh: new Set(), orders: [], loading: true, error: null, connected: true, direction: 0,
 });
 
-function upsertOrders(list: Order[], changed: Order[]): Order[] {
+export function upsertOrders(list: Order[], changed: Order[]): Order[] {
     let next = list;
     for (const o of changed) {
         next = next.filter((x) => x.id !== o.id);
@@ -107,12 +107,14 @@ export interface Quote {
     last: number | null;
 }
 
-export function quoteOf(s: MarketState): Quote {
-    const bestBid = num(s.depth?.bids[0]?.price);
-    const bestAsk = num(s.depth?.asks[0]?.price);
+export const quoteOf = (s: MarketState): Quote => quoteFrom(s.depth, s.trades);
+
+export function quoteFrom(depth: Depth | null, trades: MarketTrade[]): Quote {
+    const bestBid = num(depth?.bids[0]?.price);
+    const bestAsk = num(depth?.asks[0]?.price);
     const mid = bestBid && bestAsk ? (bestBid + bestAsk) / 2 : bestBid || bestAsk || null;
     const spread = bestBid && bestAsk ? bestAsk - bestBid : null;
-    const last = num(s.trades[0]?.price) || num(s.depth?.last_price) || null;
+    const last = num(trades[0]?.price) || num(depth?.last_price) || null;
     return { bestBid, bestAsk, mid, spread, last };
 }
 

@@ -12,10 +12,11 @@ const publicTrade = ({ buy_user_id: _b, sell_user_id: _s, buy_order_id: _bo, sel
 export class Hub {
   /**
    * @param {{ exchange: import('events').EventEmitter & { depth(symbol: string): object|null, status(): object },
-   *           pg: import('pg').Pool, log: object }} deps
+   *           auction?: import('./auction.js').Auction, pg: import('pg').Pool, log: object }} deps
    */
-  constructor({ exchange, pg, log }) {
+  constructor({ exchange, auction, pg, log }) {
     this.exchange = exchange;
+    this.auction = auction;
     this.pg = pg;
     this.log = log;
     this.clients = new Set();
@@ -31,6 +32,8 @@ export class Hub {
     exchange.on('depth', this.onDepth);
     exchange.on('event', this.onEvent);
     exchange.on('status', this.onStatus);
+    this.onAuction = (change) => this.#auction(change);
+    auction?.on('change', this.onAuction);
   }
 
   add(client) {
@@ -84,6 +87,38 @@ export class Hub {
     for (const userId of touched) this.refreshBalances(userId, BALANCE_DEBOUNCE_MS);
   }
 
+  /** The auction's book and trades to everyone on the pair, its orders and fills to their owners. */
+  async #auction({ symbol, orders, trades }) {
+    const watching = [...this.clients].filter((c) => c.symbol === symbol);
+    if (watching.length) {
+      try {
+        const book = await this.auction.book(symbol);
+        for (const c of watching) this.send(c, { type: 'auction_book', book });
+      } catch (err) {
+        this.log.warn({ err: { message: err.message } }, 'hub: reading the auction book failed');
+      }
+      if (trades.length) {
+        const pub = trades.map(publicTrade);
+        for (const c of watching) this.send(c, { type: 'auction_trades', symbol, trades: pub });
+      }
+    }
+
+    const touched = new Set(orders.map((o) => o.user_id));
+    for (const t of trades) touched.add(t.buy_user_id).add(t.sell_user_id);
+    for (const c of this.clients) {
+      if (!c.userId || !touched.has(c.userId)) continue;
+      this.send(c, {
+        type: 'auction_user',
+        symbol,
+        orders: orders.filter((o) => o.user_id === c.userId).map(({ user_id: _u, ...o }) => o),
+        trades: trades
+          .filter((t) => t.buy_user_id === c.userId || t.sell_user_id === c.userId)
+          .map((t) => ({ ...publicTrade(t), side: t.buy_user_id === c.userId ? 'buy' : 'sell' })),
+      });
+    }
+    for (const userId of touched) this.refreshBalances(userId, BALANCE_DEBOUNCE_MS);
+  }
+
   /** Reads and pushes a user's balances to their sockets, e.g. after a fill or a payment. */
   refreshBalances(userId, delayMs = 0) {
     if (![...this.clients].some((c) => c.userId === userId)) return;
@@ -109,6 +144,7 @@ export class Hub {
     this.exchange.off('depth', this.onDepth);
     this.exchange.off('event', this.onEvent);
     this.exchange.off('status', this.onStatus);
+    this.auction?.off('change', this.onAuction);
     for (const t of this.balanceTimers.values()) clearTimeout(t);
     for (const c of this.clients) c.socket.close?.();
     this.clients.clear();

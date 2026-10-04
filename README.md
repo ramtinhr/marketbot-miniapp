@@ -57,7 +57,13 @@ All of these need a verified session.
 | `GET /orders?symbol&scope`, `GET /trades?symbol` | the user's orders (`open`/`history`/`all`) and fills |
 | `POST /orders` | `{symbol, side, type: "limit"\|"market", price?, quantity}` |
 | `POST /orders/:id/cancel` | |
-| `GET /market/ws` | WebSocket: send `{type:"auth", token}` and `{type:"subscribe", symbol}`; get `depth`, `trades`, `user` (own orders and fills) and `balances` |
+| `GET /auction/:symbol` | the pair's auction `{book, trades}` (public) |
+| `GET /auction/orders?symbol&scope` | the user's auction orders |
+| `POST /auction/orders` | `{symbol, side, price, quantity}` → `{order, trades}` |
+| `POST /auction/orders/:id/cancel` | unfreezes what the order still holds |
+| `GET /market/ws` | WebSocket: send `{type:"auth", token}` and `{type:"subscribe", symbol}`; get `depth`, `trades`, `user` (own orders and fills), `balances`, and for the auction `auction_book`, `auction_trades`, `auction_user` |
+
+The **auction** is a second book per pair where users trade only with each other - never with venue liquidity, the engine or Kafka. An auction order says "buy (or sell) X at Y": it fills at once against crossing auction orders of other users, best price first, each fill at the resting order's price, and the rest stays on the auction book until it fills or is cancelled. What it may spend (Toman at its limit for a buy, the coin for a sell) is frozen in the exchange wallet while it is open; a buy filled below its limit gets the difference back. Placing, matching and settling happen in one Postgres transaction under a lock per pair (`src/auction.js`; tables `miniapp_auction_orders` and `miniapp_auction_trades`). On the trade page, tapping Buy or Sell opens a sheet to choose market, limit or auction; auction switches the book, form and lists to the auction's.
 
 The engine matches limit orders only. A **market** order is sent as a limit order priced `MARKET_SLIPPAGE_BPS` past the deepest level it needs, and whatever does not fill at once is cancelled. On the trade page's **limit** tab the price follows the best price on the other side of the book (best ask to buy, best bid to sell) until the user types one, so normally only the amount is entered; tapping a book row sets that price.
 
@@ -134,7 +140,7 @@ With `NODE_ENV=production` (set by the prod compose file) the server refuses to 
 | `MINIAPP_ENV` | secret | yes | the server's whole `.env`, multi-line - see below |
 | `TELEGRAM_BOT_TOKEN` | secret | no | bot that posts CI and deploy messages; unset turns the messages off |
 | `TELEGRAM_CHAT_ID_CICD` | secret | no | numeric chat ID for those messages (`-100...` for a channel) |
-| `MINIAPP_DEPLOY_PATH` | variable | yes | directory on the server for the compose file and `.env`, e.g. `/opt/marketbot-miniapp` |
+| `MINIAPP_DEPLOY_PATH` | variable | no | directory on the server for the compose file and `.env`, e.g. `/opt/marketbot-miniapp` (the SSH user must be able to write there); default `/opt/marketbot-miniapp` |
 | `SSH_PORT` | variable | no | SSH port; default `22` |
 | `BOT_USERNAME` | variable | no | bot username without `@`, baked into the web build for the "open in Telegram" link |
 
