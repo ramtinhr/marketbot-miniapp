@@ -65,11 +65,16 @@ export function useBackHandler(handler: (() => void) | null | false | undefined)
     useEffect(() => (active ? addHandler(ref) : undefined), [active, addHandler]);
 }
 
-export function NavProvider({ initialTab = 'home', initialStack = [], children }: { initialTab?: Tab; initialStack?: Page[]; children: ReactNode }) {
+export function NavProvider({ initialTab = 'home', initialStack = [], initialOrderType = 'limit', children }: {
+    initialTab?: Tab;
+    initialStack?: Page[];
+    initialOrderType?: OrderType;
+    children: ReactNode;
+}) {
     const [tab, setTabState] = useState<Tab>(initialTab);
     const [stack, setStack] = useState<Page[]>(initialStack);
     const [symbol, setSymbol] = useState('USDT_IRT');
-    const [orderType, setOrderType] = useState<OrderType>('limit');
+    const [orderType, setOrderType] = useState<OrderType>(initialOrderType);
     const [tradeSheet, setTradeSheet] = useState<string | null>(null);
     const handlers = useRef<{ current: () => void }[]>([]);
     const [handlerCount, setHandlerCount] = useState(0);

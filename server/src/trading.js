@@ -110,6 +110,19 @@ export class Trading {
     return this.exchange.depth(symbol);
   }
 
+  /** What a coin is worth in Toman now, by base asset: the book's best bid, what selling would get. */
+  tomanPrices() {
+    const prices = {};
+    for (const s of this.symbols()) {
+      const depth = this.depth(s);
+      const bid = Number(depth?.bids?.[0]?.price) || 0;
+      const ask = Number(depth?.asks?.[0]?.price) || 0;
+      const price = bid || ask || Number(depth?.last_price) || 0;
+      if (price) prices[s.split('_')[0]] = price;
+    }
+    return prices;
+  }
+
   async summary(symbol) {
     const [day, volume] = await Promise.all([
       this.pg.query(DAY_SQL, [symbol]).catch(() => ({ rows: [] })),

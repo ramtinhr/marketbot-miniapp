@@ -69,6 +69,12 @@ The engine matches limit orders only. A **market** order is sent as a limit orde
 
 A withdrawal request only freezes the amount: paying it out (a debit from frozen) or rejecting it (an unfreeze) is an operator's job, not built here yet. Crypto deposits are not available yet.
 
+## The bot's chat
+
+`/start` (and any other message) answers with a welcome and buttons: **باز کردن مارکت‌بات** opens the Mini App, **مزایده** opens it on the auction, **موجودی من** shows the wallet's balances right in the chat (with a refresh button), **شارژ کیف پول** opens the charge page. `/balance` and `/auction` (also `t.me/<bot>?start=balance|auction`) go straight to those. The chat's menu button opens the Mini App. Balances are shown to the Telegram account that owns the wallet, once it has an exchange account (after its first SMS code); before that the bot says to sign up in the app.
+
+The buttons open the app with `?screen=auction|wallet|charge|trade` (a `t.me/<bot>/<app>?startapp=` link's start parameter works too). Updates arrive by webhook at `POST /api/v1/telegram/webhook`, checked against a secret derived from `BOT_TOKEN`, and the reply is the response body - so the bot answers even though Telegram is blocked from the server. At boot the server registers the webhook, the menu button and the commands through `TELEGRAM_PROXY_URL`; if that fails it logs a warning and Telegram keeps the previous settings (`BOT_UPDATES` in `.env.example`; `src/bot.js`).
+
 ## Running
 
 ```bash

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { api, ApiError, setToken, type User } from './api';
 import { reauthenticate } from './live';
-import type { Page, Tab } from './nav';
+import type { OrderType, Page, Tab } from './nav';
 import { OtpScreen } from './screens/Otp';
 import { ErrorScreen, Loading, OutsideTelegram, PhoneScreen } from './screens/Screens';
 import { Shell } from './screens/Shell';
@@ -20,7 +20,24 @@ type State =
     | { kind: 'error'; code: string }
     // Signed in, but money waits for the SMS code (once per session).
     | { kind: 'otp'; user: User }
-    | { kind: 'app'; user: User; tab?: Tab; stack?: Page[] };
+    | { kind: 'app'; user: User } & Launch;
+
+interface Launch { tab?: Tab; stack?: Page[]; orderType?: OrderType }
+
+/**
+ * Where the app opens: the bot's buttons add `?screen=`, and a t.me link's
+ * `startapp=` arrives as the launch parameters' start_param.
+ */
+function launchScreen(): Launch {
+    const screen = new URLSearchParams(window.location.search).get('screen') ?? webApp()?.initDataUnsafe.start_param;
+    switch (screen) {
+        case 'auction': return { tab: 'trade', orderType: 'auction' };
+        case 'trade': return { tab: 'trade' };
+        case 'wallet': return { tab: 'wallet' };
+        case 'charge': return { tab: 'wallet', stack: [{ name: 'charge' }] };
+        default: return {};
+    }
+}
 
 export const PREVIEW_USER: User = {
     id: 1,
@@ -77,7 +94,7 @@ function remember(token: string | null) {
     } catch { /* storage unavailable: the session lasts this launch */ }
 }
 
-const signedIn = (user: User, verified: boolean | undefined): State => (verified ? { kind: 'app', user } : { kind: 'otp', user });
+const signedIn = (user: User, verified: boolean | undefined): State => (verified ? { kind: 'app', user, ...launchScreen() } : { kind: 'otp', user });
 
 export default function App() {
     const [preview] = useState(previewState);
@@ -126,7 +143,7 @@ export default function App() {
         await api.verifyLoginCode(code);
         // The socket was told about the session before it could see money.
         reauthenticate();
-        setState({ kind: 'app', user });
+        setState({ kind: 'app', user, ...launchScreen() });
     }, []);
 
     useEffect(() => {
@@ -139,6 +156,6 @@ export default function App() {
         case 'phone': return <PhoneScreen onShare={sharePhone} error={state.error} />;
         case 'error': return <ErrorScreen code={state.code} onRetry={signIn} />;
         case 'otp': return <OtpScreen phone={state.user.phone} send={api.sendLoginCode} verify={(code) => verify(state.user, code)} />;
-        case 'app': return <Shell user={state.user} initialTab={state.tab} initialStack={state.stack} />;
+        case 'app': return <Shell user={state.user} initialTab={state.tab} initialStack={state.stack} initialOrderType={state.orderType} />;
     }
 }

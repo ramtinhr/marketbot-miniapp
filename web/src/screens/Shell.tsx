@@ -4,7 +4,7 @@ import { CandlesIcon, HomeIcon, WalletIcon } from '../components/icons';
 import { Toaster, type Icon } from '../components/ui';
 import { baseOf } from '../format';
 import { t } from '../i18n';
-import { NavProvider, useNav, type Page, type Tab } from '../nav';
+import { NavProvider, useNav, type OrderType, type Page, type Tab } from '../nav';
 import { UserContext } from '../user';
 import { ChargePage } from './Charge';
 import { Home } from './Screens';
@@ -75,10 +75,10 @@ function Current({ user }: { user: User }) {
 }
 
 /** The signed-in, SMS-verified app: three tabs and the pages opened from them. */
-export function Shell({ user, initialTab, initialStack }: { user: User; initialTab?: Tab; initialStack?: Page[] }) {
+export function Shell({ user, initialTab, initialStack, initialOrderType }: { user: User; initialTab?: Tab; initialStack?: Page[]; initialOrderType?: OrderType }) {
     return (
         <UserContext.Provider value={user}>
-            <NavProvider initialTab={initialTab} initialStack={initialStack}>
+            <NavProvider initialTab={initialTab} initialStack={initialStack} initialOrderType={initialOrderType}>
                 <Current user={user} />
                 <TradeTypeSheet />
                 <Toaster />

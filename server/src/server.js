@@ -1,5 +1,6 @@
 import { buildApp } from './app.js';
 import { Auction } from './auction.js';
+import { Bot } from './bot.js';
 import { config } from './config.js';
 import { createPool } from './db.js';
 import { ExchangeBridge } from './exchange.js';
@@ -63,6 +64,16 @@ const trading = new Trading({ pg, exchange, slippageBps: config.exchange.marketS
 const auction = new Auction({ pg, wallets, log: bootLog });
 const hub = new Hub({ exchange, auction, pg, log: bootLog });
 const photos = new TelegramPhotos({ botToken: config.auth.botToken, ...config.telegram, log: bootLog });
+const bot = new Bot({
+  botToken: config.auth.botToken,
+  publicUrl: config.publicUrl,
+  ...config.telegram,
+  mode: config.botUpdates,
+  pg,
+  wallets,
+  trading,
+  log: bootLog,
+});
 
 const app = await buildApp({
   users,
@@ -74,6 +85,7 @@ const app = await buildApp({
   auction,
   hub,
   photos,
+  bot,
   botUsername: config.botUsername,
   logger: { level: config.logLevel },
 });
@@ -96,6 +108,7 @@ async function shutdown(signal) {
   closing = true;
   app.log.info({ signal }, 'shutting down');
   try {
+    bot.stop();
     hub.close();
     await app.close();
     await exchange.close();
@@ -110,6 +123,8 @@ process.on('SIGTERM', shutdown);
 try {
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`miniapp api: http://localhost:${config.port}/api/v1`);
+  // In the background: Telegram, through the relay, may be slow or unreachable.
+  bot.setup().then(() => bot.mode === 'polling' && bot.poll());
 } catch (err) {
   app.log.error({ err }, 'failed to start');
   process.exit(1);

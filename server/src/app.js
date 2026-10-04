@@ -39,9 +39,9 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  *           wallets?: import('./wallets.js').Wallets, payments?: import('./payments.js').Payments,
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
  *           auction?: import('./auction.js').Auction, hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
- *           botUsername?: string, logger?: object|boolean }} deps
+ *           bot?: import('./bot.js').Bot, botUsername?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, hub, photos, botUsername = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, hub, photos, bot, botUsername = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -180,15 +180,7 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
         api.get('/wallet', { preHandler: requireVerified }, async (req) => {
           const balances = await wallets.balances(req.session.exchangeUserId);
           const symbols = trading ? trading.symbols() : [];
-          // What a coin is worth in Toman now: the book's best bid, what selling would get.
-          const prices = {};
-          for (const s of symbols) {
-            const depth = trading.depth(s);
-            const bid = Number(depth?.bids?.[0]?.price) || 0;
-            const ask = Number(depth?.asks?.[0]?.price) || 0;
-            const price = bid || ask || Number(depth?.last_price) || 0;
-            if (price) prices[s.split('_')[0]] = price;
-          }
+          const prices = trading ? trading.tomanPrices() : {};
           const assets = ['IRT', ...symbols.map((s) => s.split('_')[0])];
           return { balances, assets: [...new Set([...assets, ...balances.map((b) => b.asset)])], prices };
         });
@@ -336,6 +328,30 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
           if (!isSymbol(symbol)) throw httpError(404, 'not_found', 'unknown symbol');
           const [book, trades] = await Promise.all([auction.book(symbol), auction.trades(symbol)]);
           return { symbol, book, trades };
+        });
+      }
+
+      // ---- The bot's chat -----------------------------------------------------
+
+      // Telegram posts every update here; the reply rides back in the response
+      // body, so it needs no call out to Telegram. Always 200 to a genuine
+      // call, or Telegram retries the update over and over.
+      if (bot) {
+        api.post('/telegram/webhook', async (req, reply) => {
+          if (!bot.verifyWebhook(req.headers['x-telegram-bot-api-secret-token'])) {
+            return reply.code(401).send({ error: 'bad secret', code: 'unauthorized' });
+          }
+          let actions = [];
+          try {
+            actions = await bot.handle(req.body || {});
+          } catch (err) {
+            req.log.error({ err: { message: err.message } }, 'bot update failed');
+            const chatId = req.body?.message?.chat?.id ?? req.body?.callback_query?.message?.chat?.id;
+            if (chatId) actions = [{ method: 'sendMessage', chat_id: chatId, text: 'مشکلی پیش آمد؛ چند لحظه بعد دوباره تلاش کنید.' }];
+          }
+          const [first, ...rest] = actions;
+          for (const action of rest) bot.run(action).catch(() => {});
+          return first ?? {};
         });
       }
 

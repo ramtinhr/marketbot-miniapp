@@ -35,7 +35,7 @@ type ThemeColorKey = 'bg_color' | 'secondary_bg_color';
 
 interface TelegramWebApp {
     initData: string;
-    initDataUnsafe: { user?: TelegramUser };
+    initDataUnsafe: { user?: TelegramUser; start_param?: string };
     version: string;
     colorScheme: 'light' | 'dark';
     isVersionAtLeast(version: string): boolean;

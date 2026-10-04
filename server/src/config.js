@@ -55,6 +55,10 @@ export const config = {
     proxyKey: str('TELEGRAM_PROXY_KEY', ''),
   },
 
+  // How the bot's chat gets its updates: "webhook" (at $PUBLIC_URL), "polling"
+  // (development; removes the webhook) or "off". Webhook when PUBLIC_URL is https.
+  botUpdates: str('BOT_UPDATES', /^https:\/\//.test(str('PUBLIC_URL', '')) ? 'webhook' : 'off'),
+
   otp: {
     ttlSeconds: int('OTP_TTL_SECONDS', 120),
     resendSeconds: int('OTP_RESEND_SECONDS', 60),
