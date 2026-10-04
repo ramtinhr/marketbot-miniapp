@@ -12,6 +12,8 @@ import { selection, webApp } from './telegram';
 
 export type Tab = 'home' | 'wallet' | 'trade';
 
+export type OrderType = 'limit' | 'market' | 'auction';
+
 export type Page =
     | { name: 'asset'; asset: string }
     | { name: 'charge' }
@@ -28,8 +30,16 @@ interface Nav {
     setTab(tab: Tab): void;
     push(page: Page): void;
     back(): void;
+    /** The kind of order the trade tab places. */
+    orderType: OrderType;
+    setOrderType(type: OrderType): void;
     /** Switches to the trade tab on `symbol`, closing any open pages. */
-    trade(symbol: string): void;
+    trade(symbol: string, type?: OrderType): void;
+    /** The pair the order-type sheet is open for, if it is. */
+    tradeSheet: string | null;
+    /** Asks for the order type (market, limit, auction), then opens the trade tab. */
+    openTrade(symbol?: string): void;
+    closeTradeSheet(): void;
     /** @internal see useBackHandler */
     addHandler(handler: { current: () => void }): () => void;
 }
@@ -59,6 +69,8 @@ export function NavProvider({ initialTab = 'home', initialStack = [], children }
     const [tab, setTabState] = useState<Tab>(initialTab);
     const [stack, setStack] = useState<Page[]>(initialStack);
     const [symbol, setSymbol] = useState('USDT_IRT');
+    const [orderType, setOrderType] = useState<OrderType>('limit');
+    const [tradeSheet, setTradeSheet] = useState<string | null>(null);
     const handlers = useRef<{ current: () => void }[]>([]);
     const [handlerCount, setHandlerCount] = useState(0);
 
@@ -81,12 +93,20 @@ export function NavProvider({ initialTab = 'home', initialStack = [], children }
         setStack((s) => [...s, page]);
         window.scrollTo(0, 0);
     }, []);
-    const trade = useCallback((next: string) => {
+    const trade = useCallback((next: string, type?: OrderType) => {
         setSymbol(next);
+        if (type) setOrderType(type);
         setTabState('trade');
         setStack([]);
         window.scrollTo(0, 0);
     }, []);
+    const symbolRef = useRef(symbol);
+    symbolRef.current = symbol;
+    const openTrade = useCallback((next?: string) => {
+        selection();
+        setTradeSheet(next ?? symbolRef.current);
+    }, []);
+    const closeTradeSheet = useCallback(() => setTradeSheet(null), []);
 
     const canGoBack = handlerCount > 0 || stack.length > 0 || tab !== 'home';
     const state = useRef({ stack, tab });
@@ -118,8 +138,8 @@ export function NavProvider({ initialTab = 'home', initialStack = [], children }
     useEffect(() => () => webApp()?.BackButton.hide(), []);
 
     const value = useMemo(
-        () => ({ tab, stack, symbol, canGoBack, setTab, push, back, trade, addHandler }),
-        [tab, stack, symbol, canGoBack, setTab, push, back, trade, addHandler],
+        () => ({ tab, stack, symbol, canGoBack, setTab, push, back, orderType, setOrderType, trade, tradeSheet, openTrade, closeTradeSheet, addHandler }),
+        [tab, stack, symbol, canGoBack, setTab, push, back, orderType, trade, tradeSheet, openTrade, closeTradeSheet, addHandler],
     );
     return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

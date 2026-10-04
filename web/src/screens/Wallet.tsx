@@ -50,7 +50,7 @@ export function WalletPage() {
                     <QuickAction icon={CreditCardIcon} label={t('wallet.charge')} onClick={() => nav.push({ name: 'charge' })} />
                     <QuickAction icon={ArrowDownIcon} label={t('wallet.deposit')} onClick={() => nav.push({ name: 'deposit' })} />
                     <QuickAction icon={ArrowUpIcon} label={t('wallet.withdraw')} onClick={() => nav.push({ name: 'withdraw' })} />
-                    <QuickAction icon={CandlesIcon} label={t('wallet.trade')} onClick={() => nav.setTab('trade')} />
+                    <QuickAction icon={CandlesIcon} label={t('wallet.trade')} onClick={() => nav.openTrade()} />
                 </div>
             </section>
 
@@ -152,7 +152,7 @@ export function AssetPage({ asset }: { asset: string }) {
                 {asset === 'IRT' ? (
                     <button type="button" className="button" onClick={() => nav.push({ name: 'charge' })}><CreditCardIcon />{t('wallet.charge')}</button>
                 ) : (
-                    <button type="button" className="button" onClick={() => nav.trade(`${asset}_IRT`)}><CandlesIcon />{t('asset.trade')}</button>
+                    <button type="button" className="button" onClick={() => nav.openTrade(`${asset}_IRT`)}><CandlesIcon />{t('asset.trade')}</button>
                 )}
                 <button type="button" className="button secondary" onClick={() => nav.push({ name: 'withdraw', asset })}><ArrowUpIcon />{t('wallet.withdraw')}</button>
             </div>

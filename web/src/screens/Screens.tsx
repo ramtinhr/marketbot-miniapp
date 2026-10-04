@@ -221,7 +221,7 @@ export function Home({ user }: { user: User }) {
             </button>
 
             <ul className="section">
-                <NavRow icon={CandlesIcon} tone="success" title={t('home.tradeTitle')} body={t('home.tradeBody')} onClick={() => nav.setTab('trade')} />
+                <NavRow icon={CandlesIcon} tone="success" title={t('home.tradeTitle')} body={t('home.tradeBody')} onClick={() => nav.openTrade()} />
                 <NavRow icon={CreditCardIcon} tone="accent" title={t('home.chargeTitle')} body={t('home.chargeBody')} onClick={() => { nav.setTab('wallet'); nav.push({ name: 'charge' }); }} />
             </ul>
 

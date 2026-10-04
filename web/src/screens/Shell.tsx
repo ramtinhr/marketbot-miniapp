@@ -1,12 +1,15 @@
 import type { User } from '../api';
+import { ActionSheet } from '../components/ActionSheet';
 import { CandlesIcon, HomeIcon, WalletIcon } from '../components/icons';
 import { Toaster, type Icon } from '../components/ui';
+import { baseOf } from '../format';
 import { t } from '../i18n';
 import { NavProvider, useNav, type Page, type Tab } from '../nav';
 import { UserContext } from '../user';
 import { ChargePage } from './Charge';
 import { Home } from './Screens';
 import { TradePage } from './trade/Trade';
+import { typeOptions } from './trade/TradeForm';
 import { AssetPage, DepositPage, WalletPage } from './Wallet';
 import { WithdrawPage } from './Withdraw';
 
@@ -22,12 +25,29 @@ function TabBar() {
         <nav className="tabbar" aria-label={t('tabs.label')}>
             {TABS.map(({ tab, icon: I, label }) => (
                 <button key={tab} type="button" className={nav.tab === tab ? 'active' : ''} aria-current={nav.tab === tab ? 'page' : undefined}
-                        onClick={() => nav.setTab(tab)}>
+                        onClick={() => (tab === 'trade' ? nav.openTrade() : nav.setTab(tab))}>
                     <I />
                     <span>{t(label)}</span>
                 </button>
             ))}
         </nav>
+    );
+}
+
+/** The order-type sheet the trade entry points open before the trade tab. */
+function TradeTypeSheet() {
+    const nav = useNav();
+    if (!nav.tradeSheet) return null;
+    const symbol = nav.tradeSheet;
+    return (
+        <ActionSheet
+            title={t('trade.pickTitle', { base: baseOf(symbol) })}
+            message={t('trade.pickType')}
+            value={nav.tab === 'trade' && !nav.stack.length ? nav.orderType : undefined}
+            options={typeOptions()}
+            onSelect={(type) => nav.trade(symbol, type)}
+            onClose={nav.closeTradeSheet}
+        />
     );
 }
 
@@ -60,6 +80,7 @@ export function Shell({ user, initialTab, initialStack }: { user: User; initialT
         <UserContext.Provider value={user}>
             <NavProvider initialTab={initialTab} initialStack={initialStack}>
                 <Current user={user} />
+                <TradeTypeSheet />
                 <Toaster />
             </NavProvider>
         </UserContext.Provider>

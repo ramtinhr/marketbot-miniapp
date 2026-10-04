@@ -10,7 +10,7 @@ import { confirm, haptic, selection } from '../../telegram';
 import { useAuction } from './auction';
 import { quoteFrom, quoteOf, useMarket, type MarketState } from './market';
 import { OrderBook } from './OrderBook';
-import { TradeForm, type OrderType, type PriceRequest } from './TradeForm';
+import { TradeForm, type PriceRequest } from './TradeForm';
 
 function PairSheet({ symbols, current, onPick, onClose }: { symbols: string[]; current: string; onPick: (s: string) => void; onClose: () => void }) {
     useBackHandler(onClose);
@@ -157,7 +157,7 @@ export function TradePage() {
     const [picking, setPicking] = useState(false);
     const [request, setRequest] = useState<PriceRequest | null>(null);
     const [tab, setTab] = useState<'orders' | 'trades'>('orders');
-    const [type, setType] = useState<OrderType>('limit');
+    const { orderType: type, setOrderType: setType } = nav;
     const auctionMode = type === 'auction';
 
     const onFill = useCallback((o: Order) => {

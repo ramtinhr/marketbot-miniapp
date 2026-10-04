@@ -5,13 +5,17 @@ import { ActionSheet } from '../../components/ActionSheet';
 import { AmountInput, Segmented, Spinner, toast } from '../../components/ui';
 import { assetDigits, asciiNumber, baseOf, fmtAsset, fmtPrice, fmtToman, num, parseAmount, toAmount } from '../../format';
 import { errorMessage, t } from '../../i18n';
+import type { OrderType } from '../../nav';
 import { haptic, selection } from '../../telegram';
 import { balanceOf, useWallet } from '../../wallet';
 import { levelsFor, qtyForCost, walkBook, type MarketState, type Quote } from './market';
 
 /** Limit and market go to the exchange; auction to the auction's own book. */
-export type OrderType = 'limit' | 'market' | 'auction';
-const TYPES: OrderType[] = ['market', 'limit', 'auction'];
+export type { OrderType };
+export const TYPES: OrderType[] = ['market', 'limit', 'auction'];
+
+export const typeOptions = () => TYPES.map((ty) => ({ value: ty, label: t(`trade.${ty}`), description: t(`trade.${ty}Desc`) }));
+
 const PERCENTS = [25, 50, 75, 100];
 // A market buy is sent at a price a little past the book (the server's
 // slippage margin), and the engine holds that much Toman; leave room for it.
@@ -226,7 +230,7 @@ export function TradeForm({ symbol, s, quote, auctionDepth, digits, request, typ
                     title={t(sheetFor === 'buy' ? 'trade.submitBuy' : 'trade.submitSell', { base })}
                     message={t('trade.pickType')}
                     value={sheetFor === side ? type : undefined}
-                    options={TYPES.map((ty) => ({ value: ty, label: t(`trade.${ty}`), description: t(`trade.${ty}Desc`) }))}
+                    options={typeOptions()}
                     onSelect={(ty) => choose(sheetFor, ty)}
                     onClose={() => setSheetFor(null)}
                 />

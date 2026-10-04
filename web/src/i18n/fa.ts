@@ -180,6 +180,7 @@ export const fa = {
     'trade.market': 'بازار',
     'trade.auction': 'مزایده',
     'trade.pickType': 'نوع سفارش را انتخاب کنید',
+    'trade.pickTitle': 'خرید و فروش {base}',
     'trade.marketDesc': 'فوری، با بهترین قیمت موجود',
     'trade.limitDesc': 'با قیمت دلخواه شما در دفتر سفارش',
     'trade.auctionDesc': 'پیشنهاد قیمت به کاربران دیگر در دفتر مزایده',
