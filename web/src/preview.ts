@@ -2,7 +2,7 @@
 // with a book that moves and trades that print, so every screen can be seen
 // and worked on in a browser without Telegram, Kafka or the engine.
 
-import type { AuctionBook, Balance, Depth, DepthLevel, MarketTrade, Order, Payment, Withdrawal } from './api';
+import type { AuctionBook, AuctionOffer, Balance, Depth, DepthLevel, MarketTrade, Order, Payment, Withdrawal } from './api';
 import { useTransport, type Transport } from './live';
 
 const MIDS: Record<string, number> = {
@@ -71,16 +71,29 @@ const auctionMine: Order[] = [];
 function auctionOffers(symbol: string): Order[] {
     if (!auctionOthers[symbol]) {
         const mid = MIDS[symbol];
-        const offer = (side: Order['side'], pct: number, qty: number): Order => ({
+        let age = 9;
+        const offer = (side: Order['side'], pct: number, qty: number, filled = 0): Order => ({
             id: id(), symbol, side, price: String(+(mid * (1 + pct / 100)).toFixed(mid > 1000 ? 0 : 4)),
-            quantity: (qty * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2), filled_quantity: '0', status: 'open', created_at: now(),
+            quantity: (qty * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2),
+            filled_quantity: (filled * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2),
+            status: filled ? 'partial' : 'open', created_at: new Date(Date.now() - age-- * 7 * 60_000).toISOString(),
         });
         auctionOthers[symbol] = [
-            offer('sell', 0.4, 120), offer('sell', 0.4, 60), offer('sell', 0.9, 300), offer('sell', 1.6, 75),
-            offer('buy', -0.5, 200), offer('buy', -1.1, 90), offer('buy', -1.1, 140), offer('buy', -2, 500),
+            offer('buy', -2, 500), offer('sell', 1.6, 75), offer('buy', -1.1, 90), offer('sell', 0.9, 300, 120),
+            offer('buy', -1.1, 140), offer('sell', 0.4, 120), offer('buy', -0.5, 200), offer('sell', 0.4, 60),
         ];
     }
     return [...auctionOthers[symbol], ...auctionMine.filter((o) => o.symbol === symbol)];
+}
+/** The board: every open offer, newest first. */
+function auctionBoard(symbol: string): AuctionOffer[] {
+    return auctionOffers(symbol)
+        .map((o) => ({ id: o.id, side: o.side, price: o.price, quantity: o.quantity, remaining: String(+(Number(o.quantity) - Number(o.filled_quantity)).toFixed(8)), created_at: o.created_at }))
+        .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+function pushAuction(symbol: string) {
+    liveSocket?.push({ type: 'auction_book', book: auctionBook(symbol) });
+    liveSocket?.push({ type: 'auction_offers', symbol, offers: auctionBoard(symbol) });
 }
 function auctionBook(symbol: string): AuctionBook {
     const levels = (side: Order['side'], dir: number) => {
@@ -174,18 +187,35 @@ async function route(method: string, path: string, body: Record<string, unknown>
             filled_quantity: '0', status: 'open', created_at: now(),
         };
         auctionMine.unshift(o);
-        liveSocket?.push({ type: 'auction_book', book: auctionBook(o.symbol) });
+        pushAuction(o.symbol);
         return json({ order: o, trades: [] }, 201);
     }
     const cancelA = /^\/auction\/orders\/(.+)\/cancel$/.exec(p);
     if (cancelA) {
         const i = auctionMine.findIndex((o) => o.id === cancelA[1]);
         const [o] = i >= 0 ? auctionMine.splice(i, 1) : [];
-        if (o) liveSocket?.push({ type: 'auction_book', book: auctionBook(o.symbol) });
+        if (o) pushAuction(o.symbol);
         return json({ order: o ? { ...o, status: 'cancelled' } : null });
     }
+    const take = /^\/auction\/offers\/(.+)\/take$/.exec(p);
+    if (take) {
+        const list = Object.values(auctionOthers).find((l) => l.some((o) => o.id === take[1]));
+        const maker = list?.find((o) => o.id === take[1]);
+        if (!list || !maker) return json({ error: 'gone', code: 'offer_gone' }, 409);
+        const qty = Number(body.quantity);
+        const left = Number(maker.quantity) - Number(maker.filled_quantity);
+        if (qty > left + 1e-12) return json({ error: 'short', code: 'offer_short', remaining: String(left) }, 409);
+        maker.filled_quantity = String(+(Number(maker.filled_quantity) + qty).toFixed(8));
+        maker.status = qty >= left - 1e-12 ? 'filled' : 'partial';
+        if (maker.status === 'filled') list.splice(list.indexOf(maker), 1);
+        const tr: MarketTrade = { id: id(), symbol: maker.symbol, price: maker.price, quantity: String(qty), taker_side: maker.side === 'buy' ? 'sell' : 'buy', executed_at: now() };
+        liveSocket?.push({ type: 'auction_trades', symbol: maker.symbol, trades: [tr] });
+        pushAuction(maker.symbol);
+        const order: Order = { id: id(), symbol: maker.symbol, side: tr.taker_side, price: maker.price, quantity: String(qty), filled_quantity: String(qty), status: 'filled', created_at: now() };
+        return json({ order, trades: [tr] }, 201);
+    }
     const auction = /^\/auction\/([A-Z0-9]+_IRT)$/.exec(p);
-    if (auction) return json({ symbol: auction[1], book: auctionBook(auction[1]), trades: [] });
+    if (auction) return json({ symbol: auction[1], book: auctionBook(auction[1]), offers: auctionBoard(auction[1]), trades: [] });
     const cancelO = /^\/orders\/(.+)\/cancel$/.exec(p);
     if (cancelO) {
         const i = orders.findIndex((o) => o.id === cancelO[1]);

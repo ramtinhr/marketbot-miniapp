@@ -3,7 +3,7 @@
 // its own, and on every (re)connect says who the user is and which pair to
 // watch again, so callers only subscribe once.
 
-import type { AuctionBook, Balance, Depth, MarketTrade, Order } from './api';
+import type { AuctionBook, AuctionOffer, Balance, Depth, MarketTrade, Order } from './api';
 import { currentToken } from './api';
 
 export type LiveMessage =
@@ -14,6 +14,7 @@ export type LiveMessage =
     | { type: 'user'; symbol: string; orders: Order[]; trades: MarketTrade[] }
     | { type: 'balances'; balances: Balance[] }
     | { type: 'auction_book'; book: AuctionBook }
+    | { type: 'auction_offers'; symbol: string; offers: AuctionOffer[] }
     | { type: 'auction_trades'; symbol: string; trades: MarketTrade[] }
     | { type: 'auction_user'; symbol: string; orders: Order[]; trades: MarketTrade[] };
 

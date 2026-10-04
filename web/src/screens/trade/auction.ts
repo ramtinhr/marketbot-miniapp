@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, ApiError, type AuctionBook, type MarketTrade, type Order } from '../../api';
+import { api, ApiError, type AuctionBook, type AuctionOffer, type MarketTrade, type Order } from '../../api';
 import { num } from '../../format';
 import { listen } from '../../live';
 import { isOpen, upsertOrders } from './market';
@@ -9,6 +9,8 @@ const MAX_TRADES = 40;
 
 export interface AuctionState {
     book: AuctionBook | null;
+    /** Open orders one by one, newest first, for the board. */
+    offers: AuctionOffer[];
     trades: MarketTrade[];
     fresh: Set<string>;
     orders: Order[];
@@ -17,7 +19,7 @@ export interface AuctionState {
     direction: number;
 }
 
-const empty = (): AuctionState => ({ book: null, trades: [], fresh: new Set(), orders: [], loading: true, error: null, direction: 0 });
+const empty = (): AuctionState => ({ book: null, offers: [], trades: [], fresh: new Set(), orders: [], loading: true, error: null, direction: 0 });
 
 /**
  * A pair's auction as the trade page shows it in auction mode: its own book,
@@ -36,12 +38,13 @@ export function useAuction(symbol: string, enabled: boolean, onFill?: (order: Or
         Promise.all([api.auction(symbol), api.auctionOrders(symbol, 'open').catch(() => ({ orders: [] as Order[] }))])
             .then(([a, o]) => {
                 if (!alive) return;
-                setS((prev) => ({ ...prev, book: a.book, trades: a.trades, orders: o.orders.filter(isOpen), loading: false, error: null }));
+                setS((prev) => ({ ...prev, book: a.book, offers: a.offers ?? [], trades: a.trades, orders: o.orders.filter(isOpen), loading: false, error: null }));
             })
             .catch((err) => alive && setS((prev) => ({ ...prev, loading: false, error: err instanceof ApiError ? err.code : 'unknown' })));
 
         const off = listen((msg) => {
             if (msg.type === 'auction_book' && msg.book.symbol === symbol) setS((prev) => ({ ...prev, book: msg.book }));
+            else if (msg.type === 'auction_offers' && msg.symbol === symbol) setS((prev) => ({ ...prev, offers: msg.offers }));
             else if (msg.type === 'auction_trades' && msg.symbol === symbol) {
                 setS((prev) => {
                     const known = new Set(prev.trades.map((x) => x.id));

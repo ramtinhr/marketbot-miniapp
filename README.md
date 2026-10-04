@@ -61,9 +61,12 @@ All of these need a verified session.
 | `GET /auction/orders?symbol&scope` | the user's auction orders |
 | `POST /auction/orders` | `{symbol, side, price, quantity}` → `{order, trades}` |
 | `POST /auction/orders/:id/cancel` | unfreezes what the order still holds |
-| `GET /market/ws` | WebSocket: send `{type:"auth", token}` and `{type:"subscribe", symbol}`; get `depth`, `trades`, `user` (own orders and fills), `balances`, and for the auction `auction_book`, `auction_trades`, `auction_user` |
+| `POST /auction/offers/:id/take` | `{quantity}` → `{order, trades}`: takes that much of one offer on the board, at its price |
+| `GET /market/ws` | WebSocket: send `{type:"auth", token}` and `{type:"subscribe", symbol}`; get `depth`, `trades`, `user` (own orders and fills), `balances`, and for the auction `auction_book`, `auction_offers`, `auction_trades`, `auction_user` |
 
 The **auction** is a second book per pair where users trade only with each other - never with venue liquidity, the engine or Kafka. An auction order says "buy (or sell) X at Y": it fills at once against crossing auction orders of other users, best price first, each fill at the resting order's price, and the rest stays on the auction book until it fills or is cancelled. What it may spend (Toman at its limit for a buy, the coin for a sell) is frozen in the exchange wallet while it is open; a buy filled below its limit gets the difference back. Placing, matching and settling happen in one Postgres transaction under a lock per pair (`src/auction.js`; tables `miniapp_auction_orders` and `miniapp_auction_trades`). On the trade page, tapping Buy or Sell opens a sheet to choose market, limit or auction; auction switches the book, form and lists to the auction's.
+
+The auction has two views, switched at the top of the page (the choice is remembered). **آگهی‌ها** (the default) shows it the way Telegram's USDT trading groups work: every open order is a post - «تتر را به قیمت ۱۰۲٬۳۵۰ تومان با حجم ۱۲۰ می‌خرم» - newest at the bottom, the user's own on the other side with a button to withdraw it. A new post is written as the same sentence with blanks («من تتر را به قیمت … تومان با حجم … می‌خرم/می‌فروشم»). Others' posts have «از او می‌خرم» / «به او می‌فروشم», which opens a sheet for how much of it to take: `POST /auction/offers/:id/take` fills against that one order only, at its price - even if a better one is on the board - and never rests (`409 offer_gone`, `offer_short` with `remaining`, or `own_offer` otherwise). `GET /auction/:symbol` also returns `offers` (open orders one by one, newest first, without their owners), pushed again as `auction_offers` on every change. **دفتر سفارش** is the same orders as a price-level book, with the order form.
 
 The engine matches limit orders only. A **market** order is sent as a limit order priced `MARKET_SLIPPAGE_BPS` past the deepest level it needs, and whatever does not fill at once is cancelled. On the trade page's **limit** tab the price follows the best price on the other side of the book (best ask to buy, best bid to sell) until the user types one, so normally only the amount is entered; tapping a book row sets that price.
 
@@ -71,9 +74,15 @@ A withdrawal request only freezes the amount: paying it out (a debit from frozen
 
 ## The bot's chat
 
-`/start` (and any other message) answers with a welcome and buttons: **باز کردن مارکت‌بات** opens the Mini App, **مزایده** opens it on the auction, **موجودی من** shows the wallet's balances right in the chat (with a refresh button), **شارژ کیف پول** opens the charge page. `/balance` and `/auction` (also `t.me/<bot>?start=balance|auction`) go straight to those. The chat's menu button opens the Mini App. Balances are shown to the Telegram account that owns the wallet, once it has an exchange account (after its first SMS code); before that the bot says to sign up in the app.
+A new chat shows the bot's description above Telegram's own Start button. `/start` (and any other message) answers with a welcome and a reply keyboard: **باز کردن مارکت‌بات** and **شارژ کیف پول** answer with an inline button into the Mini App, **مزایده** with one into the auction, **موجودی من** shows the wallet's balances right in the chat (with a refresh button). The keyboard's buttons are plain text because a Mini App opened from a keyboard button gets no launch parameters, which sign-in needs; the menu button beside the text field opens the app in one tap. `/balance` and `/auction` (also `t.me/<bot>?start=balance|auction`) go straight to those. The chat's menu button opens the Mini App. Balances are shown to the Telegram account that owns the wallet, once it has an exchange account (after its first SMS code); before that the bot says to sign up in the app.
 
-The buttons open the app with `?screen=auction|wallet|charge|trade` (a `t.me/<bot>/<app>?startapp=` link's start parameter works too). Updates arrive by webhook at `POST /api/v1/telegram/webhook`, checked against a secret derived from `BOT_TOKEN`, and the reply is the response body - so the bot answers even though Telegram is blocked from the server. At boot the server registers the webhook, the menu button and the commands through `TELEGRAM_PROXY_URL`; if that fails it logs a warning and Telegram keeps the previous settings (`BOT_UPDATES` in `.env.example`; `src/bot.js`).
+The buttons open the app with `?screen=auction|wallet|charge|trade` (a `t.me/<bot>/<app>?startapp=` link's start parameter works too). Updates arrive by webhook at `POST /api/v1/telegram/webhook`, checked against a secret derived from `BOT_TOKEN`, and the reply is the response body - so the bot answers even though Telegram is blocked from the server. The webhook, the menu button and the commands are registered once, through the bot's relay (`TELEGRAM_PROXY_URL`, the same as the bot's alerts), and Telegram keeps them; run it again only if `PUBLIC_URL` or `BOT_TOKEN` changes:
+
+```bash
+cd server && npm run bot:setup     # reads server/.env; prints the webhook Telegram now has
+```
+
+(`BOT_UPDATES` in `.env.example`; `src/bot.js`.)
 
 ## Running
 

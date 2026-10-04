@@ -64,7 +64,9 @@ export interface PlacedOrder { order: Order | null; trades: MarketTrade[]; type:
 /** The auction's own book: users' orders only, `orders` resting at each price. */
 export interface AuctionLevel { price: string; quantity: string; orders: number }
 export interface AuctionBook { symbol: string; bids: AuctionLevel[]; asks: AuctionLevel[]; last_price: string }
-export interface AuctionMarket { symbol: string; book: AuctionBook; trades: MarketTrade[] }
+/** One open auction order as the board shows it: "I buy (or sell) `remaining` at `price`". */
+export interface AuctionOffer { id: string; side: Side; price: string; quantity: string; remaining: string; created_at: string }
+export interface AuctionMarket { symbol: string; book: AuctionBook; offers: AuctionOffer[]; trades: MarketTrade[] }
 
 /** The server answered with an error; `code` picks the message the app shows. */
 export class ApiError extends Error {
@@ -156,4 +158,5 @@ export const api = {
     placeAuctionOrder: (body: { symbol: string; side: Side; price: string; quantity: string }) =>
         post<{ order: Order; trades: MarketTrade[] }>('/auction/orders', body),
     cancelAuctionOrder: (id: string) => post<{ order: Order | null }>(`/auction/orders/${id}/cancel`),
+    takeAuctionOffer: (id: string, quantity: string) => post<{ order: Order; trades: MarketTrade[] }>(`/auction/offers/${id}/take`, { quantity }),
 };

@@ -8,6 +8,7 @@ import { errorMessage, t } from '../../i18n';
 import { useBackHandler, useNav } from '../../nav';
 import { confirm, haptic, selection } from '../../telegram';
 import { useAuction } from './auction';
+import { AuctionBoard } from './AuctionBoard';
 import { quoteFrom, quoteOf, useMarket, type MarketState } from './market';
 import { OrderBook } from './OrderBook';
 import { TradeForm, type PriceRequest } from './TradeForm';
@@ -150,6 +151,27 @@ function OpenOrders({ symbol, orders, digits, cancelOrder, onCancelled }: {
     );
 }
 
+/** How the auction is shown: as a trading group's posts, or as an order book. */
+type AuctionView = 'board' | 'book';
+const VIEW_KEY = 'auction.view';
+
+function useAuctionView(): [AuctionView, (v: AuctionView) => void] {
+    const [view, setView] = useState<AuctionView>(() => {
+        try {
+            return localStorage.getItem(VIEW_KEY) === 'book' ? 'book' : 'board';
+        } catch {
+            return 'board';
+        }
+    });
+    const set = useCallback((v: AuctionView) => {
+        setView(v);
+        try {
+            localStorage.setItem(VIEW_KEY, v);
+        } catch { /* private mode: only for this visit */ }
+    }, []);
+    return [view, set];
+}
+
 export function TradePage() {
     const nav = useNav();
     const symbol = nav.symbol;
@@ -159,6 +181,8 @@ export function TradePage() {
     const [tab, setTab] = useState<'orders' | 'trades'>('orders');
     const { orderType: type, setOrderType: setType } = nav;
     const auctionMode = type === 'auction';
+    const [auctionView, setAuctionView] = useAuctionView();
+    const board = auctionMode && auctionView === 'board';
 
     const onFill = useCallback((o: Order) => {
         haptic('success');
@@ -179,9 +203,26 @@ export function TradePage() {
         <main className="screen tabbed wide trade enter">
             <Ticker symbol={symbol} s={s} digits={digits} onPair={() => { selection(); setPicking(true); }} />
             {(auctionMode ? auction.error : s.error) && <p className="tf-error">{errorMessage((auctionMode ? auction.error : s.error) as string)}</p>}
+            {auctionMode && (
+                <Segmented
+                    className="auction-views"
+                    value={auctionView}
+                    onChange={setAuctionView}
+                    options={[
+                        { value: 'board', label: t('board.view.board') },
+                        { value: 'book', label: t('board.view.book') },
+                    ]}
+                />
+            )}
 
-            <div className="trade-grid">
-                {auctionMode ? (
+            <div className={`trade-grid ${board ? 'with-board' : ''}`}>
+                {board ? (
+                    <AuctionBoard
+                        symbol={symbol} offers={auction.offers} orders={auction.orders} loading={auction.loading} digits={digits}
+                        marketBest={{ bid: quote.bestBid, ask: quote.bestAsk }}
+                        type={type} onType={setType} onPlaced={applyAuctionOrder}
+                    />
+                ) : auctionMode ? (
                     <OrderBook
                         symbol={symbol} depth={auction.book} orders={auction.orders} loading={auction.loading} direction={auction.direction}
                         quote={auctionQuote} digits={digits} auction onPick={(_side, price) => setRequest({ price, n: Date.now() })}
@@ -192,11 +233,13 @@ export function TradePage() {
                         quote={quote} digits={digits} onPick={(_side, price) => setRequest({ price, n: Date.now() })}
                     />
                 )}
-                <TradeForm
-                    symbol={symbol} s={s} quote={quote} auctionDepth={auction.book} digits={digits} request={request}
-                    type={type} onType={setType}
-                    onPlaced={(o, placedType) => (placedType === 'auction' ? applyAuctionOrder(o) : applyOrder(o))}
-                />
+                {!board && (
+                    <TradeForm
+                        symbol={symbol} s={s} quote={quote} auctionDepth={auction.book} digits={digits} request={request}
+                        type={type} onType={setType}
+                        onPlaced={(o, placedType) => (placedType === 'auction' ? applyAuctionOrder(o) : applyOrder(o))}
+                    />
+                )}
                 <section className="panel lists">
                     <Segmented
                         value={tab}

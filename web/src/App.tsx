@@ -68,6 +68,7 @@ function previewState(): State | null {
         case 'home': return { kind: 'app', user };
         case 'wallet': return { kind: 'app', user, tab: 'wallet' };
         case 'trade': return { kind: 'app', user, tab: 'trade' };
+        case 'auction': return { kind: 'app', user, tab: 'trade', orderType: 'auction' };
         case 'asset': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'asset', asset: 'USDT' }] };
         case 'charge': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'charge' }] };
         case 'deposit': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'deposit' }] };
