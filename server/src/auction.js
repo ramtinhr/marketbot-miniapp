@@ -11,6 +11,10 @@
 // difference back. Placing, matching and settling are one transaction, under
 // a lock per pair, so two orders never match against the same resting one.
 //
+// The same orders are also shown one by one, as offers on a board, the way
+// Telegram's trading groups post "I buy X at Y": taking an offer fills against
+// that order alone, at its price, and never rests on the book.
+//
 // Amounts are computed as integers of 10^-18, the wallets' NUMERIC(36,18): a
 // price and a quantity carry at most 8 decimals each, so every product is exact.
 
@@ -25,6 +29,7 @@ const SCALE = 18;
 const ONE = 10n ** BigInt(SCALE);
 const OPEN = ['open', 'partial'];
 const BOOK_LEVELS = 50;
+const BOARD_OFFERS = 100;
 
 /** A non-negative decimal string as an integer of 10^-18. */
 export function units(value) {
@@ -114,6 +119,18 @@ function orderJson(o) {
   };
 }
 
+/** An open order as the board shows it to everyone: no owner, what is left of it. */
+function offerJson(o) {
+  return {
+    id: o.id,
+    side: o.side,
+    price: decimal(o.price),
+    quantity: decimal(o.quantity),
+    remaining: decimal(o.quantity - o.filled),
+    created_at: o.createdAt,
+  };
+}
+
 const tradeJson = (t) => ({
   id: t.id,
   symbol: t.symbol,
@@ -177,6 +194,17 @@ export class Auction extends EventEmitter {
     });
   }
 
+  /** A pair's open orders one by one, newest first, for the board. */
+  offers(symbol, limit = BOARD_OFFERS) {
+    return this.#run(async () => {
+      const { rows } = await this.pg.query(
+        `SELECT ${COLUMNS} FROM miniapp_auction_orders WHERE symbol = $1 AND status = ANY($2) ORDER BY seq DESC LIMIT $3`,
+        [symbol, OPEN, limit],
+      );
+      return rows.map((r) => offerJson(stateOf(r)));
+    });
+  }
+
   trades(symbol, limit = 40) {
     return this.#run(async () => {
       const { rows } = await this.pg.query(
@@ -218,24 +246,10 @@ export class Auction extends EventEmitter {
   /** Places an auction order and matches it; resolves with { order, trades } as committed. */
   async place(exchangeUserId, body, { actor }) {
     const o = this.normalize(body);
-    const base = o.symbol.split('_')[0];
-    const price = units(o.price);
-    const quantity = units(o.quantity);
-    const hold = holdFor(o.side, price, quantity);
-    const holdAsset = o.side === 'buy' ? 'IRT' : base;
-
     const result = await this.#run(() =>
       withTransaction(this.pg, async (c) => {
         await this.#lock(c, o.symbol);
-        const { rows: [row] } = await c.query(
-          `INSERT INTO miniapp_auction_orders (exchange_user_id, symbol, side, price, quantity, held)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
-          [exchangeUserId, o.symbol, o.side, o.price, o.quantity, decimal(hold)],
-        );
-        await this.wallets.move(c, 'freeze', exchangeUserId, holdAsset, decimal(hold), {
-          referenceType: 'auction_order', referenceId: row.id, reason: `auction ${o.side} order on ${o.symbol}`, actor,
-        });
-
+        const taker = await this.#insert(c, exchangeUserId, o, actor);
         const opposite = o.side === 'buy' ? 'sell' : 'buy';
         const { rows: resting } = await c.query(
           `SELECT ${COLUMNS} FROM miniapp_auction_orders
@@ -245,44 +259,97 @@ export class Auction extends EventEmitter {
             FOR UPDATE`,
           [o.symbol, opposite, OPEN, exchangeUserId, o.price],
         );
-        let taker = stateOf(row);
         const { fills } = matchAuction(taker, resting.map(stateOf));
-
-        const makers = [];
-        const trades = [];
-        for (const f of fills) {
-          taker = fillOrder(taker, f.quantity, f.price);
-          const maker = fillOrder(f.maker, f.quantity, f.price);
-          makers.push(maker);
-          const [buy, sell] = o.side === 'buy' ? [taker, maker] : [maker, taker];
-          const trade = { id: randomUUID(), symbol: o.symbol, price: f.price, quantity: f.quantity, takerSide: o.side, buy, sell };
-          await this.#settle(c, trade, base, actor);
-          trades.push(trade);
-        }
-
-        for (const ord of fills.length ? [taker, ...makers] : []) {
-          await c.query(
-            `UPDATE miniapp_auction_orders SET filled_quantity = $2, filled_quote = $3, held = $4, status = $5, updated_at = now()
-              WHERE id = $1`,
-            [ord.id, decimal(ord.filled), decimal(ord.filledQuote), decimal(ord.held), ord.status],
-          );
-        }
-        const recorded = [];
-        for (const t of trades) {
-          const { rows: [tr] } = await c.query(
-            `INSERT INTO miniapp_auction_trades (id, symbol, price, quantity, taker_side, buy_order_id, sell_order_id, buy_user_id, sell_user_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${TRADE_COLUMNS}`,
-            [t.id, t.symbol, decimal(t.price), decimal(t.quantity), t.takerSide, t.buy.id, t.sell.id, t.buy.userId, t.sell.userId],
-          );
-          recorded.push(tr);
-        }
-        return { taker, makers, trades: recorded };
+        return this.#execute(c, taker, fills, actor);
       }),
     );
 
     this.#announce(o.symbol, [result.taker, ...result.makers], result.trades);
     this.log?.info({ order: result.taker.id, symbol: o.symbol, side: o.side, fills: result.trades.length, status: result.taker.status }, 'auction order placed');
     return { order: orderJson(result.taker), trades: result.trades.map(tradeJson) };
+  }
+
+  /**
+   * Takes `quantity` of one offer on the board - an answer to "I buy X at Y"
+   * or "I sell X at Y" - at its price, all at once: an order of the other side
+   * that fills against that offer alone and is never left on the book.
+   */
+  async take(exchangeUserId, offerId, body, { actor }) {
+    if (!isUUID(offerId)) throw httpError(400, 'bad_request', 'offer id must be a UUID');
+    const quantity = asciiAmount(body?.quantity);
+    if (!quantity) throw httpError(400, 'invalid_quantity', 'quantity must be a positive number with at most 8 decimals');
+
+    const result = await this.#run(async () => {
+      const found = await this.pg.query('SELECT symbol FROM miniapp_auction_orders WHERE id = $1', [offerId]);
+      if (!found.rows.length) throw httpError(404, 'offer_gone', 'no such offer');
+      const { symbol } = found.rows[0];
+      return withTransaction(this.pg, async (c) => {
+        await this.#lock(c, symbol);
+        const { rows: [row] } = await c.query(`SELECT ${COLUMNS} FROM miniapp_auction_orders WHERE id = $1 FOR UPDATE`, [offerId]);
+        const maker = stateOf(row);
+        if (!OPEN.includes(maker.status)) throw httpError(409, 'offer_gone', 'the offer is already filled or cancelled');
+        if (maker.userId === exchangeUserId) throw httpError(409, 'own_offer', 'an offer cannot be taken by its own poster');
+        const left = maker.quantity - maker.filled;
+        if (units(quantity) > left) {
+          throw httpError(409, 'offer_short', 'the offer has less left than asked for', { remaining: decimal(left) });
+        }
+        const side = maker.side === 'buy' ? 'sell' : 'buy';
+        const taker = await this.#insert(c, exchangeUserId, { symbol, side, price: decimal(maker.price), quantity }, actor);
+        return this.#execute(c, taker, [{ maker, quantity: taker.quantity, price: maker.price }], actor);
+      });
+    });
+
+    this.#announce(result.taker.symbol, [result.taker, ...result.makers], result.trades);
+    this.log?.info({ order: result.taker.id, offer: offerId, symbol: result.taker.symbol, side: result.taker.side }, 'auction offer taken');
+    return { order: orderJson(result.taker), trades: result.trades.map(tradeJson) };
+  }
+
+  /** Records a new order and freezes what it may spend; returns its state. */
+  async #insert(c, exchangeUserId, o, actor) {
+    const hold = holdFor(o.side, units(o.price), units(o.quantity));
+    const { rows: [row] } = await c.query(
+      `INSERT INTO miniapp_auction_orders (exchange_user_id, symbol, side, price, quantity, held)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
+      [exchangeUserId, o.symbol, o.side, o.price, o.quantity, decimal(hold)],
+    );
+    await this.wallets.move(c, 'freeze', exchangeUserId, o.side === 'buy' ? 'IRT' : o.symbol.split('_')[0], decimal(hold), {
+      referenceType: 'auction_order', referenceId: row.id, reason: `auction ${o.side} order on ${o.symbol}`, actor,
+    });
+    return stateOf(row);
+  }
+
+  /** Settles `fills` of `taker` against resting orders and records the orders' new state and the trades. */
+  async #execute(c, taker, fills, actor) {
+    const base = taker.symbol.split('_')[0];
+    const makers = [];
+    const trades = [];
+    for (const f of fills) {
+      taker = fillOrder(taker, f.quantity, f.price);
+      const maker = fillOrder(f.maker, f.quantity, f.price);
+      makers.push(maker);
+      const [buy, sell] = taker.side === 'buy' ? [taker, maker] : [maker, taker];
+      const trade = { id: randomUUID(), symbol: taker.symbol, price: f.price, quantity: f.quantity, takerSide: taker.side, buy, sell };
+      await this.#settle(c, trade, base, actor);
+      trades.push(trade);
+    }
+
+    for (const ord of fills.length ? [taker, ...makers] : []) {
+      await c.query(
+        `UPDATE miniapp_auction_orders SET filled_quantity = $2, filled_quote = $3, held = $4, status = $5, updated_at = now()
+          WHERE id = $1`,
+        [ord.id, decimal(ord.filled), decimal(ord.filledQuote), decimal(ord.held), ord.status],
+      );
+    }
+    const recorded = [];
+    for (const t of trades) {
+      const { rows: [tr] } = await c.query(
+        `INSERT INTO miniapp_auction_trades (id, symbol, price, quantity, taker_side, buy_order_id, sell_order_id, buy_user_id, sell_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${TRADE_COLUMNS}`,
+        [t.id, t.symbol, decimal(t.price), decimal(t.quantity), t.takerSide, t.buy.id, t.sell.id, t.buy.userId, t.sell.userId],
+      );
+      recorded.push(tr);
+    }
+    return { taker, makers, trades: recorded };
   }
 
   /**

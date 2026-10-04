@@ -323,11 +323,17 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
         api.post('/auction/orders/:id/cancel', { preHandler: requireVerified }, async (req) =>
           auction.cancel(req.session.exchangeUserId, req.params.id, { actor: `miniapp:${req.user.id}` }));
 
+        api.post('/auction/offers/:id/take', { preHandler: requireVerified }, async (req, reply) => {
+          const taken = await auction.take(req.session.exchangeUserId, req.params.id, req.body, { actor: `miniapp:${req.user.id}` });
+          req.log.info({ user: req.user.id, offer: req.params.id, order: taken.order.id }, 'auction offer taken');
+          return reply.code(201).send(taken);
+        });
+
         api.get('/auction/:symbol', async (req) => {
           const { symbol } = req.params;
           if (!isSymbol(symbol)) throw httpError(404, 'not_found', 'unknown symbol');
-          const [book, trades] = await Promise.all([auction.book(symbol), auction.trades(symbol)]);
-          return { symbol, book, trades };
+          const [book, offers, trades] = await Promise.all([auction.book(symbol), auction.offers(symbol), auction.trades(symbol)]);
+          return { symbol, book, offers, trades };
         });
       }
 

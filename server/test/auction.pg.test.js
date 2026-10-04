@@ -91,6 +91,7 @@ before(async () => {
   const credit = (user, asset, amount) =>
     withTransaction(pg, (c) => wallets.move(c, 'credit', users[user], asset, amount, { referenceType: 'test', actor: 'test' }));
   await credit('seller', 'USDT', '100');
+  await credit('seller', 'TRX', '20');
   await credit('buyer', 'IRT', '10000000');
   await credit('racer1', 'IRT', '5000000');
   await credit('racer2', 'IRT', '5000000');
@@ -146,6 +147,31 @@ test('two buys at once cannot both take the same resting sell', { skip }, async 
   assert.deepEqual([a.order.status, b.order.status].sort(), ['filled', 'open']);
   const { rows } = await pg.query("SELECT COALESCE(SUM(quantity), 0)::float8 AS q FROM miniapp_auction_trades WHERE buy_user_id = ANY($1)", [[users.racer1, users.racer2]]);
   assert.equal(rows[0].q, 10);
+});
+
+test('taking an offer fills that offer alone, at its price, and leaves nothing on the book', { skip }, async () => {
+  const cheap = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '25000', quantity: '10' }, opts);
+  const dear = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '26000', quantity: '10' }, opts);
+
+  const offers = await auction.offers('TRX_IRT');
+  assert.deepEqual(offers.map((o) => [o.id, o.remaining]), [[dear.order.id, '10'], [cheap.order.id, '10']], 'newest first, no owner');
+  assert.equal('user_id' in offers[0], false);
+
+  const before = await balance('buyer', 'IRT');
+  const taken = await auction.take(users.buyer, dear.order.id, { quantity: '4' }, opts);
+  assert.equal(taken.order.status, 'filled');
+  assert.equal(taken.order.side, 'buy');
+  assert.deepEqual(taken.trades.map((t) => [t.price, t.quantity]), [['26000', '4']], 'the chosen offer, not the cheaper one');
+  assert.deepEqual(await balance('buyer', 'IRT'), { available: before.available - 104_000, frozen: before.frozen });
+
+  const left = await auction.offers('TRX_IRT');
+  assert.deepEqual(left.map((o) => [o.id, o.remaining]), [[dear.order.id, '6'], [cheap.order.id, '10']]);
+  assert.equal((await auction.book('TRX_IRT')).bids.length, 0);
+
+  await assert.rejects(auction.take(users.buyer, dear.order.id, { quantity: '7' }, opts), { code: 'offer_short' });
+  await assert.rejects(auction.take(users.seller, dear.order.id, { quantity: '1' }, opts), { code: 'own_offer' });
+  await auction.cancel(users.seller, cheap.order.id, opts);
+  await assert.rejects(auction.take(users.buyer, cheap.order.id, { quantity: '1' }, opts), { code: 'offer_gone' });
 });
 
 test('every wallet still equals the sum of its ledger', { skip }, async () => {

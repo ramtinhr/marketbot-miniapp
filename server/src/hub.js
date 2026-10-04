@@ -87,13 +87,16 @@ export class Hub {
     for (const userId of touched) this.refreshBalances(userId, BALANCE_DEBOUNCE_MS);
   }
 
-  /** The auction's book and trades to everyone on the pair, its orders and fills to their owners. */
+  /** The auction's book, offers and trades to everyone on the pair, its orders and fills to their owners. */
   async #auction({ symbol, orders, trades }) {
     const watching = [...this.clients].filter((c) => c.symbol === symbol);
     if (watching.length) {
       try {
-        const book = await this.auction.book(symbol);
-        for (const c of watching) this.send(c, { type: 'auction_book', book });
+        const [book, offers] = await Promise.all([this.auction.book(symbol), this.auction.offers(symbol)]);
+        for (const c of watching) {
+          this.send(c, { type: 'auction_book', book });
+          this.send(c, { type: 'auction_offers', symbol, offers });
+        }
       } catch (err) {
         this.log.warn({ err: { message: err.message } }, 'hub: reading the auction book failed');
       }
