@@ -42,16 +42,31 @@ const press = (data, from = 42) => ({
 });
 const buttons = (action) => action.reply_markup.inline_keyboard.flat();
 
-test('/start answers with a welcome, the Mini App first and shortcuts after it', async () => {
+test('/start answers with a welcome and a reply keyboard of plain text buttons, open first', async () => {
   const [reply, ...rest] = await makeBot().handle(message('/start'));
   assert.equal(rest.length, 0);
   assert.equal(reply.method, 'sendMessage');
   assert.equal(reply.chat_id, 42);
   assert.match(reply.text, /سلام Ramtin/);
-  const [open, ...others] = buttons(reply);
-  assert.deepEqual(open.web_app, { url: `${URL_}/` });
-  assert.ok(others.some((b) => b.web_app?.url === `${URL_}/?screen=auction`));
-  assert.ok(others.some((b) => b.callback_data === 'balance'));
+  const keys = reply.reply_markup.keyboard.flat();
+  assert.equal(keys[0].text, '🚀 باز کردن مارکت‌بات');
+  assert.equal(keys[0].style, 'primary');
+  assert.deepEqual(keys.map((k) => k.text).slice(1), ['🔨 مزایده', '💰 موجودی من', '💳 شارژ کیف پول']);
+  assert.ok(keys.every((k) => !k.style || ['primary', 'success', 'danger'].includes(k.style)));
+  // A Mini App opened from a keyboard button gets no launch parameters to sign in with.
+  assert.ok(keys.every((k) => !k.web_app));
+  assert.equal(reply.reply_markup.resize_keyboard, true);
+});
+
+test('the keyboard\'s buttons: open and charge answer with an inline button into the app, balance shows balances', async () => {
+  const [open] = await makeBot().handle(message('🚀 باز کردن مارکت‌بات'));
+  assert.equal(buttons(open)[0].web_app.url, `${URL_}/`);
+  const [charge] = await makeBot().handle(message('شارژ کیف پول'));
+  assert.equal(buttons(charge)[0].web_app.url, `${URL_}/?screen=charge`);
+  const [auction] = await makeBot().handle(message('مزایده'));
+  assert.equal(buttons(auction)[0].web_app.url, `${URL_}/?screen=auction`);
+  const [balance] = await makeBot().handle(message('موجودی من'));
+  assert.match(balance.text, /موجودی کیف پول/);
 });
 
 test('any other text gets the welcome too; groups are ignored', async () => {
@@ -131,21 +146,26 @@ test('setup registers the menu button, commands and webhook through the relay', 
   globalThis.fetch = async (url, init) => {
     assert.equal(url, 'http://relay/request');
     assert.equal(init.headers['x-api-key'], 'K');
-    calls.push(new URL(JSON.parse(init.body).url));
-    return new Response(JSON.stringify({ ok: true, result: true }));
+    const target = new URL(JSON.parse(init.body).url);
+    calls.push(target);
+    const result = target.pathname.endsWith('/getWebhookInfo') ? { url: `${URL_}/api/v1/telegram/webhook`, pending_update_count: 0 } : true;
+    return new Response(JSON.stringify({ ok: true, result }));
   };
   const bot = makeBot({ proxyUrl: 'http://relay/', proxyKey: 'K' });
-  await bot.setup();
-  assert.deepEqual(calls.map((u) => u.pathname.split('/').pop()), ['setChatMenuButton', 'setMyCommands', 'setWebhook']);
-  const hook = calls[2].searchParams;
-  assert.equal(hook.get('url'), `${URL_}/api/v1/telegram/webhook`);
-  assert.equal(hook.get('secret_token'), bot.webhookSecret);
-  assert.equal(JSON.parse(calls[0].searchParams.get('menu_button')).web_app.url, `${URL_}/`);
+  const info = await bot.setup();
+  assert.equal(info.url, bot.webhookUrl);
+  const method = (name) => calls.find((u) => u.pathname.endsWith(`/${name}`)).searchParams;
+  assert.deepEqual(calls.map((u) => u.pathname.split('/').pop()),
+    ['setMyDescription', 'setMyShortDescription', 'setChatMenuButton', 'setMyCommands', 'setWebhook', 'getWebhookInfo']);
+  assert.ok(method('setMyShortDescription').get('short_description').length <= 120);
+  assert.ok(method('setMyDescription').get('description').length <= 512);
+  assert.equal(method('setWebhook').get('url'), `${URL_}/api/v1/telegram/webhook`);
+  assert.equal(method('setWebhook').get('secret_token'), bot.webhookSecret);
+  assert.equal(JSON.parse(method('setChatMenuButton').get('menu_button')).web_app.url, `${URL_}/`);
 });
 
-test('without a public URL the bot stays off', async () => {
-  globalThis.fetch = async () => assert.fail('no call expected');
-  const bot = new Bot({ botToken: 'T', publicUrl: '', mode: 'webhook' });
-  assert.equal(bot.mode, 'off');
-  await bot.setup();
+test('setup stops at the first call Telegram refuses, and needs a public URL', async () => {
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: false, description: 'Unauthorized' }));
+  await assert.rejects(makeBot().setup(), /setMyDescription: Unauthorized/);
+  await assert.rejects(new Bot({ botToken: 'T', publicUrl: '' }).setup(), /PUBLIC_URL/);
 });

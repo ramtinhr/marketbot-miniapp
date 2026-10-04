@@ -123,8 +123,7 @@ process.on('SIGTERM', shutdown);
 try {
   await app.listen({ host: config.host, port: config.port });
   app.log.info(`miniapp api: http://localhost:${config.port}/api/v1`);
-  // In the background: Telegram, through the relay, may be slow or unreachable.
-  bot.setup().then(() => bot.mode === 'polling' && bot.poll());
+  if (bot.mode === 'polling') bot.poll();
 } catch (err) {
   app.log.error({ err }, 'failed to start');
   process.exit(1);

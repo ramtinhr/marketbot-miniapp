@@ -1,13 +1,15 @@
-// The bot's chat: /start answers with a welcome and buttons - the Mini App
-// first, then shortcuts into it (the auction) and the wallet's balances shown
-// right in the chat. The chat's menu button opens the Mini App too.
+// The bot's chat: /start (Telegram's Start button) answers with a welcome and a
+// reply keyboard - open the Mini App, the auction, the wallet's balances shown
+// right in the chat, charging the wallet. The chat's menu button opens the Mini
+// App directly; the empty chat shows the bot's description above Start.
 //
 // Updates come by webhook (POST /api/v1/telegram/webhook), answered in the
 // response body, so replying needs no call out to Telegram - which is blocked
-// from the server. Calls that cannot ride on the response (registering the
-// webhook, the menu and commands; stopping a button's spinner) go through the
-// relay in TELEGRAM_PROXY_URL when it is set. Polling is for development: it
-// removes the webhook, so never point it at the production bot.
+// from the server. The webhook, menu button and commands are registered once,
+// with `npm run bot:setup` (src/bot-setup.js), not at every start. Other calls
+// (stopping a button's spinner) go through the relay in TELEGRAM_PROXY_URL, the
+// same one the bot's alerts use. Polling is for development: it removes the
+// webhook, so never point it at the production bot.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -18,6 +20,40 @@ const COMMANDS = [
   { command: 'balance', description: 'موجودی کیف پول' },
   { command: 'auction', description: 'مزایده' },
 ];
+
+// The reply keyboard under the text field. Plain text buttons: a Mini App
+// opened from a keyboard button gets no launch parameters, and the app signs
+// in with them, so "open" answers with an inline button (or the menu button).
+const KEYS = {
+  open: 'باز کردن مارکت‌بات',
+  auction: 'مزایده',
+  balance: 'موجودی من',
+  charge: 'شارژ کیف پول',
+};
+
+// style: "primary" blue, "success" green, "danger" red; none is the app's own.
+const KEYBOARD = {
+  keyboard: [
+    [{ text: `🚀 ${KEYS.open}`, style: 'primary' }],
+    [{ text: `🔨 ${KEYS.auction}`, style: 'success' }, { text: `💰 ${KEYS.balance}` }],
+    [{ text: `💳 ${KEYS.charge}`, style: 'primary' }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: 'یکی از گزینه‌ها را انتخاب کنید',
+};
+
+// What the empty chat shows above Telegram's Start button, and the profile's line.
+const DESCRIPTION = [
+  'مارکت‌بات؛ خرید و فروش ارز دیجیتال با تومان، همین‌جا در تلگرام.',
+  '',
+  '• معامله با سفارش بازار و محدود',
+  '• مزایده: پیشنهاد قیمت به کاربران دیگر',
+  '• شارژ آنلاین کیف پول و برداشت',
+  '',
+  'برای شروع دکمهٔ «Start» را بزنید.',
+].join('\n');
+const SHORT_DESCRIPTION = 'خرید و فروش ارز دیجیتال با تومان در تلگرام؛ بازار، محدود و مزایده.';
 
 const escapeHtml = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
@@ -96,32 +132,29 @@ export class Bot {
     return this.call(method, params);
   }
 
-  /**
-   * The menu button, the commands, and where updates go. Best effort: the bot
-   * keeps whatever was set last time if Telegram cannot be reached.
-   */
-  async setup() {
-    if (this.mode === 'off') return;
-    const steps = [
-      ['setChatMenuButton', { menu_button: { type: 'web_app', text: 'مارکت‌بات', web_app: { url: this.appUrl() } } }],
-      ['setMyCommands', { commands: COMMANDS }],
-      this.mode === 'webhook'
-        ? ['setWebhook', { url: `${this.publicUrl}/api/v1/telegram/webhook`, secret_token: this.webhookSecret, allowed_updates: ['message', 'callback_query'] }]
-        : ['deleteWebhook', {}],
-    ];
-    for (const [method, params] of steps) {
-      try {
-        await this.call(method, params);
-      } catch (err) {
-        this.#warn(err, `bot setup: ${method} failed`);
-      }
-    }
-    this.log?.info({ mode: this.mode }, 'bot ready');
+  get webhookUrl() {
+    return `${this.publicUrl}/api/v1/telegram/webhook`;
   }
 
-  /** Development: long-polls for updates until `stop()`. */
+  /**
+   * One-off: the descriptions, the menu button, the commands and the webhook.
+   * Telegram keeps them, so this runs again only when they, PUBLIC_URL or the
+   * token change. Throws on the first call Telegram refuses.
+   */
+  async setup() {
+    if (!this.botToken || !this.publicUrl) throw new Error('set BOT_TOKEN and PUBLIC_URL');
+    await this.call('setMyDescription', { description: DESCRIPTION });
+    await this.call('setMyShortDescription', { short_description: SHORT_DESCRIPTION });
+    await this.call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'مارکت‌بات', web_app: { url: this.appUrl() } } });
+    await this.call('setMyCommands', { commands: COMMANDS });
+    await this.call('setWebhook', { url: this.webhookUrl, secret_token: this.webhookSecret, allowed_updates: ['message', 'callback_query'] });
+    return this.call('getWebhookInfo');
+  }
+
+  /** Development: long-polls for updates until `stop()`. Removes the webhook first. */
   async poll() {
     this.polling = true;
+    await this.call('deleteWebhook').catch((err) => this.#warn(err, 'bot: deleteWebhook failed'));
     let offset = 0;
     while (this.polling) {
       try {
@@ -151,8 +184,16 @@ export class Bot {
   async handle(update) {
     const msg = update.message;
     if (msg?.chat?.type === 'private' && typeof msg.text === 'string') {
-      const [command, payload] = msg.text.trim().split(/\s+/);
+      const text = msg.text.trim();
       const chatId = msg.chat.id;
+      // A key's text, without the emoji in front of it.
+      switch (text.replace(/^[^\p{L}/]+/u, '')) {
+        case KEYS.open: return [this.openMessage(chatId)];
+        case KEYS.auction: return [this.auctionMessage(chatId)];
+        case KEYS.balance: return [await this.balanceMessage(chatId, msg.from.id)];
+        case KEYS.charge: return [this.openMessage(chatId, 'charge')];
+      }
+      const [command, payload] = text.split(/\s+/);
       switch (command.replace(/@\w+$/, '')) {
         case '/balance':
           return [await this.balanceMessage(chatId, msg.from.id)];
@@ -195,18 +236,20 @@ export class Bot {
         '• <b>مزایده:</b> پیشنهاد قیمت خود را به کاربران دیگر بدهید',
         '• <b>کیف پول:</b> شارژ آنلاین، موجودی و برداشت',
         '',
-        'برای شروع دکمهٔ «باز کردن مارکت‌بات» را بزنید.',
+        'از دکمه‌های پایین صفحه استفاده کنید؛ دکمهٔ «مارکت‌بات» کنار کادر پیام هم برنامه را باز می‌کند.',
       ].join('\n'),
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: 'باز کردن مارکت‌بات', web_app: { url: this.appUrl() } }],
-          [
-            { text: 'مزایده', web_app: { url: this.appUrl('auction') } },
-            { text: 'موجودی من', callback_data: 'balance' },
-          ],
-          [{ text: 'شارژ کیف پول', web_app: { url: this.appUrl('charge') } }],
-        ],
-      },
+      reply_markup: KEYBOARD,
+    };
+  }
+
+  /** An inline button into the Mini App, on `screen`: the reply keyboard's buttons cannot open it themselves. */
+  openMessage(chatId, screen) {
+    const charge = screen === 'charge';
+    return {
+      method: 'sendMessage',
+      chat_id: chatId,
+      text: charge ? 'برای شارژ کیف پول دکمهٔ زیر را بزنید.' : 'برای باز کردن مارکت‌بات دکمهٔ زیر را بزنید.',
+      reply_markup: { inline_keyboard: [[{ text: charge ? '💳 شارژ کیف پول' : '🚀 باز کردن مارکت‌بات', style: 'primary', web_app: { url: this.appUrl(screen) } }]] },
     };
   }
 
@@ -219,14 +262,14 @@ export class Bot {
         '<b>مزایده</b>',
         'قیمت و مقداری را که می‌خواهید بخرید یا بفروشید پیشنهاد دهید؛ سفارش شما فقط با پیشنهاد کاربران دیگر در دفتر مزایده معامله می‌شود و مبلغ آن تا انجام یا لغو مسدود می‌ماند.',
       ].join('\n\n'),
-      reply_markup: { inline_keyboard: [[{ text: 'ورود به مزایده', web_app: { url: this.appUrl('auction') } }]] },
+      reply_markup: { inline_keyboard: [[{ text: '🔨 ورود به مزایده', style: 'success', web_app: { url: this.appUrl('auction') } }]] },
     };
   }
 
   /** The user's balances, or how to get some: their exchange account comes with the first SMS code. */
   async balanceMessage(chatId, telegramId) {
     const reply = (text, keyboard) => ({ method: 'sendMessage', chat_id: chatId, parse_mode: 'HTML', text, reply_markup: { inline_keyboard: keyboard } });
-    const openApp = [{ text: 'باز کردن مارکت‌بات', web_app: { url: this.appUrl() } }];
+    const openApp = [{ text: '🚀 باز کردن مارکت‌بات', style: 'primary', web_app: { url: this.appUrl() } }];
 
     const { rows } = await this.pg.query('SELECT exchange_user_id, blocked_at FROM miniapp_users WHERE telegram_id = $1', [telegramId]);
     const user = rows[0];
@@ -260,8 +303,8 @@ export class Bot {
       `<i>به‌روز شده در ${time}</i>`,
     ].join('\n');
     return reply(text, [
-      [{ text: 'به‌روزرسانی', callback_data: 'balance:refresh' }, { text: 'کیف پول', web_app: { url: this.appUrl('wallet') } }],
-      [{ text: 'شارژ کیف پول', web_app: { url: this.appUrl('charge') } }],
+      [{ text: '🔄 به‌روزرسانی', callback_data: 'balance:refresh' }, { text: '👛 کیف پول', web_app: { url: this.appUrl('wallet') } }],
+      [{ text: '💳 شارژ کیف پول', style: 'primary', web_app: { url: this.appUrl('charge') } }],
     ]);
   }
 }
