@@ -13,7 +13,8 @@
     "dev": "node --watch src/server.js",
     "test": "node --test",
     "bot:setup": "node src/bot-setup.js",
-    "kaino:try": "node src/kaino-try.js"
+    "kaino:try": "node src/kaino-try.js",
+    "sms:try": "node src/sms-try.js"
   },
   "license": "UNLICENSED",
   "dependencies": {

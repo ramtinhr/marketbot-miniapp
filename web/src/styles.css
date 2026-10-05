@@ -749,20 +749,43 @@ button.balance-card { cursor: pointer; }
 .panel-head h2 { font-size: .95rem; }
 .trade-grid { display: grid; gap: 12px; }
 
-.ticker { display: grid; gap: 12px; }
-.pair { display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
-.pair-text { display: flex; flex-direction: column; line-height: 1.35; }
-.pair-name { font-weight: 800; font-size: 1.05rem; }
+.ticker { display: grid; gap: 14px; container-type: inline-size; }
+.ticker-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.pair { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.pair-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.pair-name { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
 .pair-text .hint { font-size: .78rem; }
-.pair-chevron { width: 18px; height: 18px; color: var(--hint); }
-.ticker-price { display: flex; align-items: baseline; gap: 10px; }
-.ticker-price strong { font-size: 1.65rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; transition: color .3s; }
-.change { padding: 1px 8px; border-radius: 8px; font-size: .82rem; font-weight: 700; background: color-mix(in srgb, currentColor 13%, transparent); }
-.ticker-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
-.ticker-stats div { min-width: 0; }
-.ticker-stats dt { color: var(--hint); font-size: .7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ticker-stats dd { margin: 0; font-size: .82rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.live { display: flex; align-items: center; gap: 5px; }
+.pair-chevron { flex: none; width: 18px; height: 18px; color: var(--hint); }
+.ticker-price { display: flex; align-items: center; gap: 10px; min-width: 0; }
+/* Sized to fit the card: long prices (BTC in toman) shrink, short ones grow. */
+.ticker-price strong {
+    min-width: 0;
+    font-size: 1.65rem;
+    font-size: clamp(1.3rem, calc((100cqi - 5.5rem) / (var(--len, 8) * .6)), 2.25rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+    transition: color .3s;
+}
+.change { flex: none; padding: 2px 8px; border-radius: 8px; font-size: .82rem; font-weight: 700; font-variant-numeric: tabular-nums; background: color-mix(in srgb, currentColor 13%, transparent); }
+.ticker-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding-top: 12px; border-top: 1px solid var(--separator); }
+.ticker-stats div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ticker-stats div:nth-child(2) { align-items: center; text-align: center; }
+.ticker-stats div:nth-child(3) { align-items: flex-end; text-align: end; }
+.ticker-stats dt, .ticker-stats dd { max-width: 100%; white-space: nowrap; overflow: hidden; }
+.ticker-stats dt { color: var(--hint); font-size: .72rem; text-overflow: ellipsis; }
+/* Shrinks rather than truncating: an ellipsis would hide a price's leading digits. */
+.ticker-stats dd {
+    margin: 0;
+    font-size: .88rem;
+    font-size: clamp(.66rem, calc((100cqi - 16px) / 3 / (var(--len, 8) * .6)), .88rem);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.ticker-top .live { flex: none; padding: 4px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; background: color-mix(in srgb, currentColor 8%, transparent); }
+.live { display: flex; align-items: center; gap: 6px; }
 .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--hint); }
 .live.on i { background: var(--up); box-shadow: 0 0 0 3px color-mix(in srgb, var(--up) 22%, transparent); animation: pulse 2s infinite; }
 .live.off { color: var(--danger); }
@@ -1034,7 +1057,8 @@ button.balance-card { cursor: pointer; }
     .trade-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
     .trade-grid .ob { grid-row: span 2; }
     .ticker { grid-template-columns: auto auto 1fr; align-items: center; gap: 24px; }
-    .ticker-stats { gap: 18px; }
+    .ticker-price strong { font-size: 1.9rem; }
+    .ticker-stats { gap: 18px; padding-top: 0; border-top: 0; }
 }
 @media (min-width: 1040px) {
     .trade-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }

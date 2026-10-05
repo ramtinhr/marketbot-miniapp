@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 
 import { api, ApiError, type MarketTrade, type Order } from '../../api';
 import { ChevronDownIcon, XIcon } from '../../components/icons';
@@ -48,34 +48,40 @@ function PairSheet({ symbols, current, onPick, onClose }: { symbols: string[]; c
     );
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+    return <div><dt>{label}</dt><dd style={{ '--len': value.length } as CSSProperties}>{value}</dd></div>;
+}
+
 function Ticker({ symbol, s, digits, onPair }: { symbol: string; s: MarketState; digits: number; onPair: () => void }) {
     const base = baseOf(symbol);
     const q = quoteOf(s);
     const price = q.last ?? q.mid;
     const day = s.summary;
     const change = day?.change_pct ?? null;
+    const priceText = price === null ? '—' : fmtPrice(price, digits);
     return (
         <header className="panel ticker">
-            <button type="button" className="pair" onClick={onPair}>
-                <CoinIcon asset={base} size={36} />
-                <span className="pair-text">
-                    <span className="pair-name ltr-inline">{base} / {t('common.tomanShort')}</span>
-                    <span className="hint">{assetName(base)}</span>
+            <div className="ticker-top">
+                <button type="button" className="pair" onClick={onPair}>
+                    <CoinIcon asset={base} size={36} />
+                    <span className="pair-text">
+                        <span className="pair-name ltr-inline">{base} / {t('common.tomanShort')}</span>
+                        <span className="hint">{assetName(base)}</span>
+                    </span>
+                    <ChevronDownIcon className="pair-chevron" />
+                </button>
+                <span className={`live ${s.connected ? 'on' : 'off'}`} aria-label={t('ticker.status')}>
+                    <i aria-hidden="true" />{s.connected ? t('ticker.live') : t('ticker.offline')}
                 </span>
-                <ChevronDownIcon className="pair-chevron" />
-            </button>
-            <div className="ticker-price">
-                <strong className={s.direction > 0 ? 'up' : s.direction < 0 ? 'down' : ''}>{price === null ? '—' : fmtPrice(price, digits)}</strong>
+            </div>
+            <div className="ticker-price" style={{ '--len': priceText.length } as CSSProperties}>
+                <strong className={s.direction > 0 ? 'up' : s.direction < 0 ? 'down' : ''}>{priceText}</strong>
                 {change !== null && <span className={`change ${change > 0 ? 'up' : change < 0 ? 'down' : ''}`}>{fmtPercent(change, 2, { sign: true })}</span>}
             </div>
             <dl className="ticker-stats">
-                <div><dt>{t('ticker.high')}</dt><dd>{day ? fmtPrice(day.high, digits) : '—'}</dd></div>
-                <div><dt>{t('ticker.low')}</dt><dd>{day ? fmtPrice(day.low, digits) : '—'}</dd></div>
-                <div><dt>{t('ticker.volume', { base })}</dt><dd>{day ? fmtAsset(day.volume, base, { trim: true }) : '—'}</dd></div>
-                <div>
-                    <dt>{t('ticker.status')}</dt>
-                    <dd className={`live ${s.connected ? 'on' : 'off'}`}><i aria-hidden="true" />{s.connected ? t('ticker.live') : t('ticker.offline')}</dd>
-                </div>
+                <Stat label={t('ticker.high')} value={day ? fmtPrice(day.high, digits) : '—'} />
+                <Stat label={t('ticker.low')} value={day ? fmtPrice(day.low, digits) : '—'} />
+                <Stat label={t('ticker.volume', { base })} value={day ? fmtAsset(day.volume, base, { trim: true }) : '—'} />
             </dl>
         </header>
     );
