@@ -952,6 +952,14 @@ button.balance-card { cursor: pointer; }
 .ab-text { font-size: .92rem; line-height: 1.75; }
 .ab-text strong { font-weight: 800; font-variant-numeric: tabular-nums; }
 .ab-text .up, .ab-text .down { font-weight: 800; }
+.ab-note {
+    padding-inline-start: 10px;
+    border-inline-start: 2px solid var(--separator);
+    color: var(--hint);
+    font-size: .82rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
 .ab-foot .hint { font-size: .72rem; }
 .ab-take {
     flex: none;
@@ -997,6 +1005,23 @@ button.balance-card { cursor: pointer; }
 .ab-unit { color: var(--hint); font-size: .75rem; font-weight: 700; }
 .ab-sentence .segmented { flex: none; }
 .ab-sentence .segmented button { min-height: 34px; padding: 0 12px; font-size: .88rem; }
+.ab-note-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 10px;
+    border: 1.5px solid var(--separator);
+    border-radius: 12px;
+    background: var(--page);
+    transition: border-color .15s, box-shadow .15s;
+}
+.ab-note-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+.ab-note-field.invalid { border-color: var(--danger); }
+.ab-note-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: .88rem; }
+.ab-note-field input::placeholder { color: var(--hint); }
+.ab-note-count { flex: none; color: var(--hint); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.ab-note-field.invalid .ab-note-count { color: var(--danger); }
 .ab-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--hint); font-size: .78rem; }
 .ab-summary strong { color: var(--text); font-size: .9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ab-composer .button { min-height: 50px; }

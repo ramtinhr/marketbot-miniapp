@@ -72,15 +72,16 @@ function auctionOffers(symbol: string): Order[] {
     if (!auctionOthers[symbol]) {
         const mid = MIDS[symbol];
         let age = 9;
-        const offer = (side: Order['side'], pct: number, qty: number, filled = 0): Order => ({
+        const offer = (side: Order['side'], pct: number, qty: number, filled = 0, description = ''): Order => ({
             id: id(), symbol, side, price: String(+(mid * (1 + pct / 100)).toFixed(mid > 1000 ? 0 : 4)),
             quantity: (qty * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2),
             filled_quantity: (filled * (100_000 / mid) ** 0.6).toFixed(mid > 1e6 ? 6 : 2),
-            status: filled ? 'partial' : 'open', created_at: new Date(Date.now() - age-- * 7 * 60_000).toISOString(),
+            status: filled ? 'partial' : 'open', description, created_at: new Date(Date.now() - age-- * 7 * 60_000).toISOString(),
         });
         auctionOthers[symbol] = [
-            offer('buy', -2, 500), offer('sell', 1.6, 75), offer('buy', -1.1, 90), offer('sell', 0.9, 300, 120),
-            offer('buy', -1.1, 140), offer('sell', 0.4, 120), offer('buy', -0.5, 200), offer('sell', 0.4, 60),
+            offer('buy', -2, 500), offer('sell', 1.6, 75, 0, 'خرد هم می‌فروشم، حداقل ۱۰ تا'), offer('buy', -1.1, 90),
+            offer('sell', 0.9, 300, 120), offer('buy', -1.1, 140, 0, 'فقط تسویهٔ فوری'), offer('sell', 0.4, 120),
+            offer('buy', -0.5, 200), offer('sell', 0.4, 60),
         ];
     }
     return [...auctionOthers[symbol], ...auctionMine.filter((o) => o.symbol === symbol)];
@@ -88,7 +89,7 @@ function auctionOffers(symbol: string): Order[] {
 /** The board: every open offer, newest first. */
 function auctionBoard(symbol: string): AuctionOffer[] {
     return auctionOffers(symbol)
-        .map((o) => ({ id: o.id, side: o.side, price: o.price, quantity: o.quantity, remaining: String(+(Number(o.quantity) - Number(o.filled_quantity)).toFixed(8)), created_at: o.created_at }))
+        .map((o) => ({ id: o.id, side: o.side, price: o.price, quantity: o.quantity, remaining: String(+(Number(o.quantity) - Number(o.filled_quantity)).toFixed(8)), description: o.description ?? '', created_at: o.created_at }))
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 function pushAuction(symbol: string) {
@@ -184,7 +185,7 @@ async function route(method: string, path: string, body: Record<string, unknown>
     if (p === '/auction/orders') {
         const o: Order = {
             id: id(), symbol: String(body.symbol), side: body.side as Order['side'], price: String(body.price), quantity: String(body.quantity),
-            filled_quantity: '0', status: 'open', created_at: now(),
+            filled_quantity: '0', status: 'open', description: String(body.description ?? ''), created_at: now(),
         };
         auctionMine.unshift(o);
         pushAuction(o.symbol);

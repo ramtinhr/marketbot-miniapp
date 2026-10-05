@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS miniapp_auction_orders (
 CREATE INDEX IF NOT EXISTS miniapp_auction_orders_book_idx ON miniapp_auction_orders (symbol, side, price, seq)
   WHERE status IN ('open', 'partial');
 CREATE INDEX IF NOT EXISTS miniapp_auction_orders_user_idx ON miniapp_auction_orders (exchange_user_id, created_at DESC);
+-- What the poster adds to an offer, shown with it on the board.
+ALTER TABLE miniapp_auction_orders ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '' CHECK (char_length(description) <= 120);
 
 CREATE TABLE IF NOT EXISTS miniapp_auction_trades (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

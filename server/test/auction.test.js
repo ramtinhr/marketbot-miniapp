@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { decimal, fillOrder, matchAuction, units } from '../src/auction.js';
+import { Auction, decimal, fillOrder, matchAuction, units } from '../src/auction.js';
 
 const order = (id, userId, side, price, quantity, filled = '0') => {
   const o = { id, userId, side, price: units(price), quantity: units(quantity), filled: units(filled), filledQuote: 0n, status: 'open' };
@@ -57,4 +57,14 @@ test('a sell holds the coin and releases it as it fills', () => {
   sell = fillOrder(sell, units('0.12345678'), units('0.00001234'));
   assert.equal(decimal(sell.held), '1000');
   assert.equal(decimal(sell.filledQuote), '0.0000015234566652');
+});
+
+test('an offer\'s description is optional, kept on one line, and at most 120 characters', () => {
+  const auction = new Auction({});
+  const body = { symbol: 'USDT_IRT', side: 'buy', price: '102500', quantity: '10' };
+  assert.equal(auction.normalize(body).description, '');
+  assert.equal(auction.normalize({ ...body, description: '  فقط تسویه\nفوری \t ' }).description, 'فقط تسویه فوری');
+  assert.equal(auction.normalize({ ...body, description: 'ا'.repeat(120) }).description.length, 120);
+  assert.throws(() => auction.normalize({ ...body, description: 'ا'.repeat(121) }), { code: 'invalid_description' });
+  assert.throws(() => auction.normalize({ ...body, description: 5 }), { code: 'invalid_description' });
 });

@@ -13,6 +13,7 @@
 
 import { randomBytes } from 'node:crypto';
 
+import { DESCRIPTION_MAX, cleanDescription } from './auction.js';
 import { asciiAmount, isSymbol } from './trading.js';
 
 const DEFAULT_SYMBOL = 'USDT_IRT';
@@ -40,6 +41,7 @@ const ERRORS = {
   order_not_found: 'این آگهی پیدا نشد.',
   invalid_quantity: 'مقدار درست نیست (حداکثر ۸ رقم اعشار).',
   invalid_price: 'قیمت درست نیست.',
+  invalid_description: `توضیحات حداکثر ${DESCRIPTION_MAX.toLocaleString('fa-IR')} حرف می‌تواند باشد.`,
   wallet_inactive: 'کیف پول این دارایی غیرفعال است؛ با پشتیبانی تماس بگیرید.',
   user_inactive: 'حساب معاملاتی شما فعال نیست؛ با پشتیبانی تماس بگیرید.',
   unknown_user: 'حساب معاملاتی شما پیدا نشد؛ با پشتیبانی تماس بگیرید.',
@@ -64,6 +66,11 @@ export function floorAmount(n, digits) {
   const s = v.toFixed(digits);
   return digits ? s.replace(/\.?0+$/, '') : s;
 }
+
+const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const charCount = (s) => [...s].length;
+/** An offer's description as a line under its sentence; none if it has none. */
+const note = (description) => (description ? [`💬 <i>${escapeHtml(description)}</i>`] : []);
 
 /** The offer as a group would word it: "USDT at X Toman, Y of it, I buy". */
 function sentence({ side, base, price, quantity }) {
@@ -227,7 +234,7 @@ export class AuctionChat {
       const who = mine.has(o.id) ? 'آگهی شما' : o.side === 'buy' ? 'خریدار' : 'فروشنده';
       const partial = Number(o.remaining) < Number(o.quantity) ? ` · <i>باقی‌مانده از ${fa(o.quantity, qd)}</i>` : '';
       lines.push(`${n}. ${o.side === 'buy' ? '🟢' : '🔴'} ${who} · ${clock(o.created_at)}${partial}`);
-      lines.push(sentence({ side: o.side, base, price: o.price, quantity: o.remaining }), '');
+      lines.push(sentence({ side: o.side, base, price: o.price, quantity: o.remaining }), ...note(o.description), '');
       const figures = `${fa(o.remaining, qd)} × ${fa(o.price, priceDigits(Number(o.price)))}`;
       rows.push([mine.has(o.id)
         ? { text: `${n}. حذف آگهی من · ${figures}`, callback_data: `a:x:${o.id}` }
@@ -294,6 +301,7 @@ export class AuctionChat {
       `<b>${side === 'buy' ? `خرید ${nameOf(base)} از این فروشنده` : `فروش ${nameOf(base)} به این خریدار`}</b>`,
       '',
       `«${sentence({ side: offer.side, base, price: offer.price, quantity: offer.remaining })}»`,
+      ...note(offer.description),
       '',
       `موجودی شما: ${have}`,
       options.length
@@ -384,6 +392,9 @@ export class AuctionChat {
         `<code>من ${name} را به قیمت ۱۰۲۵۰۰ تومان با حجم ۱۰۰ میخرم</code>`,
         `<code>۵۰ ${name} فی ۱۰۳٬۲۰۰ میفروشم</code>`,
         '',
+        `توضیحات (اختیاری، تا ${faInt(DESCRIPTION_MAX)} حرف) را در خط‌های بعدی بنویسید، مثلاً:`,
+        `<code>من ${name} را به قیمت ۱۰۲۵۰۰ تومان با حجم ۱۰۰ میخرم\nفقط تسویهٔ فوری، حداقل ۲۰ تا</code>`,
+        '',
         '<i>قبل از ثبت، پیش‌نمایش آگهی را می‌بینید و تأیید می‌کنید.</i>',
       ].join('\n'),
       reply_markup: { inline_keyboard: [this.#back(symbol)] },
@@ -411,6 +422,7 @@ export class AuctionChat {
       '<b>پیش‌نمایش آگهی</b>',
       '',
       `«من ${sentence({ side: d.side, base, price: d.price, quantity: d.quantity })}»`,
+      ...(d.description ? note(d.description) : [`<i>بدون توضیحات (اختیاری، تا ${faInt(DESCRIPTION_MAX)} حرف)</i>`]),
       '',
       `${d.side === 'buy' ? 'مبلغ کل' : 'دریافتی در صورت فروش'}: <b>${faInt(Math.round(total))} تومان</b>`,
       `موجودی شما: ${d.side === 'buy' ? `${faInt(Math.floor(available))} تومان` : `${fa(available, qd)} ${nameOf(base)}`}`,
@@ -426,10 +438,40 @@ export class AuctionChat {
       rows.push([{ text: 'شارژ کیف پول', web_app: { url: this.appUrl('charge') } }]);
     }
     rows.push([
+      { text: d.description ? '✎ ویرایش توضیحات' : '✎ افزودن توضیحات', callback_data: `a:pn:${draftId}` },
       { text: d.side === 'buy' ? '⇄ می‌فروشم' : '⇄ می‌خرم', callback_data: `a:ps:${draftId}` },
-      { text: 'انصراف', callback_data: `a:pd:${draftId}` },
     ]);
+    rows.push([{ text: 'انصراف', callback_data: `a:pd:${draftId}` }]);
     return { text, reply_markup: { inline_keyboard: rows } };
+  }
+
+  /** Asks for the draft's description, typed as the next message. */
+  noteCard(chatId, draftId) {
+    const d = this.#draft(draftId);
+    if (!d) return { text: 'این پیش‌نمایش منقضی شده است؛ آگهی را دوباره بنویسید.', reply_markup: { inline_keyboard: [this.#back(DEFAULT_SYMBOL)] } };
+    this.#setState(chatId, { kind: 'note', draftId });
+    const rows = [];
+    if (d.description) rows.push([{ text: 'حذف توضیحات', callback_data: `a:pr:${draftId}` }]);
+    rows.push([{ text: '↩︎ پیش‌نمایش', callback_data: `a:pv:${draftId}` }]);
+    return {
+      text: [
+        '<b>✎ توضیحات آگهی</b>',
+        '',
+        `توضیحات را بنویسید و بفرستید (حداکثر ${faInt(DESCRIPTION_MAX)} حرف)، مثلاً:`,
+        '<code>فقط تسویهٔ فوری، حداقل ۲۰ تا</code>',
+        ...(d.description ? ['', `فعلی: <i>${escapeHtml(d.description)}</i>`] : []),
+      ].join('\n'),
+      reply_markup: { inline_keyboard: rows },
+    };
+  }
+
+  /** A draft description that is too long, said back with how long it was. */
+  #tooLong(chatId, draftId, length) {
+    this.#setState(chatId, { kind: 'note', draftId });
+    return {
+      text: `توضیحات ${faInt(length)} حرف است؛ حداکثر ${faInt(DESCRIPTION_MAX)} حرف. کوتاه‌ترش کنید و دوباره بفرستید.`,
+      reply_markup: { inline_keyboard: [[{ text: '↩︎ پیش‌نمایش بدون تغییر', callback_data: `a:pv:${draftId}` }]] },
+    };
   }
 
   async post(chatId, telegramId, draftId) {
@@ -439,7 +481,11 @@ export class AuctionChat {
     if (me.error) return this.#accountCard(me.error);
     const back = this.#back(d.symbol);
     try {
-      const { order } = await this.auction.place(me.id, { symbol: d.symbol, side: d.side, price: d.price, quantity: d.quantity }, { actor: `bot:${telegramId}` });
+      const { order } = await this.auction.place(
+        me.id,
+        { symbol: d.symbol, side: d.side, price: d.price, quantity: d.quantity, description: d.description },
+        { actor: `bot:${telegramId}` },
+      );
       this.drafts.delete(draftId);
       this.states.delete(chatId);
       const base = baseOf(d.symbol);
@@ -451,7 +497,7 @@ export class AuctionChat {
           ? `<b>✓ ${fa(filled, qd)} ${nameOf(base)} همین حالا انجام شد</b>\nباقی‌مانده روی تابلو رفت.`
           : '<b>✓ آگهی شما روی تابلو رفت</b>';
       return {
-        text: [head, '', `«من ${sentence({ side: d.side, base, price: d.price, quantity: d.quantity })}»`, '', '<i>هر وقت کسی آن را بردارد، همین‌جا خبرتان می‌کنیم.</i>'].join('\n'),
+        text: [head, '', `«من ${sentence({ side: d.side, base, price: d.price, quantity: d.quantity })}»`, ...note(d.description), '', '<i>هر وقت کسی آن را بردارد، همین‌جا خبرتان می‌کنیم.</i>'].join('\n'),
         reply_markup: { inline_keyboard: [back] },
       };
     } catch (err) {
@@ -466,6 +512,16 @@ export class AuctionChat {
     this.#prune();
     const send = (card) => [{ method: 'sendMessage', chat_id: chatId, parse_mode: 'HTML', ...card }];
     const st = this.#state(chatId);
+    if (st?.kind === 'note') {
+      const d = this.#draft(st.draftId);
+      if (d) {
+        const description = cleanDescription(text);
+        if (charCount(description) > DESCRIPTION_MAX) return send(this.#tooLong(chatId, st.draftId, charCount(description)));
+        d.description = description;
+        this.states.delete(chatId);
+        return send(await this.preview(telegramId, st.draftId));
+      }
+    }
     if (st?.kind === 'amount') {
       const q = asciiAmount(text);
       if (q) {
@@ -474,13 +530,23 @@ export class AuctionChat {
       }
     }
 
-    const parsed = parseOffer(text, { prices: this.trading?.tomanPrices?.() ?? {} });
+    // The offer is the first line; whatever follows it is the description.
+    const prices = { prices: this.trading?.tomanPrices?.() ?? {} };
+    const [first, ...more] = String(text).split('\n');
+    const firstParsed = more.length ? parseOffer(first, prices) : null;
+    const [parsed, offerText, description] = firstParsed?.ok
+      ? [firstParsed, first, cleanDescription(more.join('\n'))]
+      : [parseOffer(text, prices), String(text), ''];
     if (parsed?.ok) {
-      const symbol = st?.kind === 'post' && !ALIASES.some(([, re]) => re.test(String(text).toLowerCase())) ? st.symbol : `${parsed.base}_IRT`;
+      const symbol = st?.kind === 'post' && !ALIASES.some(([, re]) => re.test(offerText.toLowerCase())) ? st.symbol : `${parsed.base}_IRT`;
       if (!isSymbol(symbol)) return null;
       const id = randomBytes(6).toString('base64url');
-      this.drafts.set(id, { symbol, side: parsed.side, price: parsed.price, quantity: parsed.quantity, expires: Date.now() + STATE_TTL_MS });
-      return send(await this.preview(telegramId, id));
+      const long = charCount(description) > DESCRIPTION_MAX;
+      this.drafts.set(id, {
+        symbol, side: parsed.side, price: parsed.price, quantity: parsed.quantity,
+        description: long ? '' : description, expires: Date.now() + STATE_TTL_MS,
+      });
+      return send(long ? this.#tooLong(chatId, id, charCount(description)) : await this.preview(telegramId, id));
     }
     if (parsed || st?.kind === 'post') {
       const symbol = st?.symbol ?? `${parsed?.base ?? 'USDT'}_IRT`;
@@ -538,6 +604,17 @@ export class AuctionChat {
         if (d) d.side = d.side === 'buy' ? 'sell' : 'buy';
         return [edit(await this.preview(tg, args[0])), done()];
       }
+      case 'pn':
+        return [edit(this.noteCard(chatId, args[0])), done()];
+      case 'pr': {
+        const d = this.#draft(args[0]);
+        if (d) d.description = '';
+        this.states.delete(chatId);
+        return [edit(await this.preview(tg, args[0])), done()];
+      }
+      case 'pv':
+        this.states.delete(chatId);
+        return [edit(await this.preview(tg, args[0])), done()];
       case 'pc':
         return [edit(await this.post(chatId, tg, args[0])), done()];
       case 'pd':

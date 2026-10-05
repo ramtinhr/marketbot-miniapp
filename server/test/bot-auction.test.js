@@ -35,7 +35,7 @@ function makeBot() {
   const offers = [
     { id: MINE, side: 'buy', price: '101000', quantity: '10', remaining: '10', created_at: '2026-10-04T11:00:00Z' },
     { id: BUY, side: 'buy', price: '101500', quantity: '40', remaining: '30', created_at: '2026-10-04T10:30:00Z' },
-    { id: SELL, side: 'sell', price: '102700', quantity: '25', remaining: '25', created_at: '2026-10-04T10:00:00Z' },
+    { id: SELL, side: 'sell', price: '102700', quantity: '25', remaining: '25', description: 'فقط تسویه فوری <کارت>', created_at: '2026-10-04T10:00:00Z' },
   ];
   const owners = { [MINE]: 'u-42', [BUY]: 'u-50', [SELL]: 'u-50' };
   const auction = {
@@ -89,6 +89,7 @@ test('the auction key shows the board in the chat: offers as sentences, newest l
   assert.match(board.text, /مزایدهٔ تتر/);
   assert.match(board.text, /تتر را به قیمت <b>۱۰۲٬۷۰۰<\/b> تومان با حجم <b>۲۵<\/b> <b>می‌فروشم<\/b>/);
   assert.match(board.text, /باقی‌مانده از ۴۰/);
+  assert.match(board.text, /<b>می‌فروشم<\/b>\n💬 <i>فقط تسویه فوری &lt;کارت&gt;<\/i>/, 'the description sits under its offer, escaped');
   assert.ok(board.text.indexOf('۱۰۲٬۷۰۰') < board.text.indexOf('۱۰۱٬۰۰۰'), 'oldest first, newest at the bottom');
   const b = buttons(board);
   assert.equal(b[0].callback_data, `a:t:${SELL}`);
@@ -141,9 +142,43 @@ test('a typed offer is shown back as a preview, and posted on confirm', async ()
 
   const [posted] = await bot.handle(press(post.callback_data));
   assert.match(posted.text, /آگهی شما روی تابلو رفت/);
-  assert.deepEqual(calls, [['place', 'u-42', { symbol: 'USDT_IRT', side: 'buy', price: '102500', quantity: '20' }, 'bot:42']]);
+  assert.deepEqual(calls, [['place', 'u-42', { symbol: 'USDT_IRT', side: 'buy', price: '102500', quantity: '20', description: '' }, 'bot:42']]);
   const [again] = await bot.handle(press(post.callback_data));
   assert.match(again.text, /منقضی/, 'a preview posts once');
+});
+
+test('the lines after a typed offer are its description', async () => {
+  const { bot, calls } = makeBot();
+  const [preview] = await bot.handle(message('من تتر را به قیمت ۱۰۲۵۰۰ تومان با حجم ۲۰ میخرم\nفقط تسویه فوری،\nحداقل ۵ تا'));
+  assert.match(preview.text, /پیش‌نمایش آگهی/);
+  assert.match(preview.text, /حجم <b>۲۰<\/b>/, 'numbers in the description do not change the offer');
+  assert.match(preview.text, /💬 <i>فقط تسویه فوری، حداقل ۵ تا<\/i>/);
+  await bot.handle(press(buttons(preview)[0].callback_data));
+  assert.equal(calls[0][2].description, 'فقط تسویه فوری، حداقل ۵ تا');
+});
+
+test('a description added, refused when too long, and removed from the preview', async () => {
+  const { bot, calls } = makeBot();
+  const [preview] = await bot.handle(message('من تتر را به قیمت ۱۰۲۵۰۰ تومان با حجم ۲۰ میخرم'));
+  assert.match(preview.text, /بدون توضیحات/);
+  const add = buttons(preview).find((x) => x.callback_data.startsWith('a:pn:'));
+  assert.match(add.text, /افزودن توضیحات/);
+  const [ask] = await bot.handle(press(add.callback_data));
+  assert.match(ask.text, /حداکثر ۱۲۰ حرف/);
+
+  const [long] = await bot.handle(message('ا'.repeat(121)));
+  assert.match(long.text, /۱۲۱ حرف است/);
+  const [withNote] = await bot.handle(message('فقط شبا'));
+  assert.match(withNote.text, /💬 <i>فقط شبا<\/i>/);
+  const edit = buttons(withNote).find((x) => x.callback_data.startsWith('a:pn:'));
+  assert.match(edit.text, /ویرایش توضیحات/);
+
+  const [editing] = await bot.handle(press(edit.callback_data));
+  const remove = buttons(editing).find((x) => x.callback_data.startsWith('a:pr:'));
+  const [cleared] = await bot.handle(press(remove.callback_data));
+  assert.match(cleared.text, /بدون توضیحات/);
+  await bot.handle(press(buttons(cleared)[0].callback_data));
+  assert.equal(calls[0][2].description, '');
 });
 
 test('a preview can be flipped to the other side, and warns when it crosses', async () => {

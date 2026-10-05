@@ -151,10 +151,11 @@ test('two buys at once cannot both take the same resting sell', { skip }, async 
 
 test('taking an offer fills that offer alone, at its price, and leaves nothing on the book', { skip }, async () => {
   const cheap = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '25000', quantity: '10' }, opts);
-  const dear = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '26000', quantity: '10' }, opts);
+  const dear = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '26000', quantity: '10', description: 'فقط تسویه فوری' }, opts);
+  assert.equal(dear.order.description, 'فقط تسویه فوری');
 
   const offers = await auction.offers('TRX_IRT');
-  assert.deepEqual(offers.map((o) => [o.id, o.remaining]), [[dear.order.id, '10'], [cheap.order.id, '10']], 'newest first, no owner');
+  assert.deepEqual(offers.map((o) => [o.id, o.remaining, o.description]), [[dear.order.id, '10', 'فقط تسویه فوری'], [cheap.order.id, '10', '']], 'newest first, no owner');
   assert.equal('user_id' in offers[0], false);
 
   const before = await balance('buyer', 'IRT');

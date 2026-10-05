@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { api, ApiError, type AuctionOffer, type Order, type Side } from '../../api';
+import { api, ApiError, AUCTION_DESCRIPTION_MAX, type AuctionOffer, type Order, type Side } from '../../api';
 import { XIcon } from '../../components/icons';
 import { AmountInput, Empty, Segmented, Spinner, toast } from '../../components/ui';
 import {
@@ -18,6 +18,15 @@ const PERCENTS = [25, 50, 75, 100];
 
 const sameDay = (iso: string) => new Date(iso).toDateString() === new Date().toDateString();
 const when = (iso: string) => (sameDay(iso) ? fmtTime(iso).slice(0, 5) : fmtDateTime(iso));
+
+/** A description as the server keeps it: one line, trimmed. */
+const cleanNote = (s: string) => s.replace(/\s+/g, ' ').trim();
+const charCount = (s: string) => [...s].length;
+
+/** What the poster added to an offer, under its sentence. */
+function OfferNote({ text }: { text?: string }) {
+    return text ? <p className="ab-note" dir="auto">{text}</p> : null;
+}
 
 /** An ASCII amount grouped as an input shows it. */
 function grouped(ascii: string): string {
@@ -53,6 +62,7 @@ function OfferBubble({ offer, base, digits, mine, onTake, onCancel, cancelling }
                 <time className="hint" dateTime={offer.created_at}>{when(offer.created_at)}</time>
             </div>
             <OfferText side={offer.side} base={base} price={offer.price} quantity={offer.remaining} digits={digits} />
+            <OfferNote text={offer.description} />
             <div className="ab-foot">
                 <span className="hint">
                     {partial
@@ -89,6 +99,7 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
     const [price, setPrice] = useState('');
     const [touched, setTouched] = useState(false);
     const [qty, setQty] = useState('');
+    const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +122,9 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
     const short = side === 'buy' ? total > irt + 1e-9 : q > coin + 1e-12;
     const cross = crossesAt[side];
     const crosses = p > 0 && cross > 0 && (side === 'buy' ? p >= cross : p <= cross);
+    const description = cleanNote(note);
+    const noteLength = charCount(description);
+    const noteLong = noteLength > AUCTION_DESCRIPTION_MAX;
 
     const max = () => {
         selection();
@@ -121,7 +135,7 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
 
     const submit = async () => {
         if (busy) return;
-        const problem = !priceValue ? 'invalid_price' : !qtyValue ? 'invalid_quantity' : short ? 'insufficient_balance' : null;
+        const problem = !priceValue ? 'invalid_price' : !qtyValue ? 'invalid_quantity' : noteLong ? 'invalid_description' : short ? 'insufficient_balance' : null;
         if (problem) {
             setError(problem);
             haptic('error');
@@ -130,13 +144,14 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
         setBusy(true);
         setError(null);
         try {
-            const { order } = await api.placeAuctionOrder({ symbol, side, price: priceValue as string, quantity: qtyValue as string });
+            const { order } = await api.placeAuctionOrder({ symbol, side, price: priceValue as string, quantity: qtyValue as string, description });
             haptic('success');
             const filled = num(order.filled_quantity);
             if (order.status === 'filled') toast(t(side === 'buy' ? 'trade.bought' : 'trade.sold', { qty: fmtAsset(filled, base, { trim: true }), base }));
             else if (filled > 0) toast(t('auction.partly', { qty: fmtAsset(filled, base, { trim: true }), base }));
             else toast(t('board.posted'));
             setQty('');
+            setNote('');
             onPlaced(order);
         } catch (err) {
             haptic('error');
@@ -179,6 +194,18 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
                     ]}
                 />
             </div>
+
+            <label className={`ab-note-field ${noteLong ? 'invalid' : ''}`}>
+                <span className="sr-only">{t('board.compose.note')}</span>
+                <input
+                    dir="auto" autoComplete="off" enterKeyHint="done" value={note}
+                    placeholder={`${t('board.compose.note')} - ${t('board.compose.notePlaceholder')}`}
+                    onChange={(e) => { setNote(e.target.value); setError(null); }}
+                />
+                <span className="ab-note-count" aria-live="polite">
+                    {fmtAsset(noteLength, 'IRT')}/{fmtAsset(AUCTION_DESCRIPTION_MAX, 'IRT')}
+                </span>
+            </label>
 
             <div className="ab-summary">
                 <span>
@@ -273,6 +300,7 @@ function TakeSheet({ symbol, offer, live, digits, onDone, onClose }: {
                 <div className={`ab-quote ${offer.side}`}>
                     <span className={`side-tag ${offer.side}`}>{t(offer.side === 'buy' ? 'board.buyer' : 'board.seller')}</span>
                     <OfferText side={offer.side} base={base} price={offer.price} quantity={String(remaining)} digits={digits} />
+                    <OfferNote text={offer.description} />
                 </div>
                 {gone ? (
                     <p className="tf-error" role="alert">{errorMessage('offer_gone')}</p>

@@ -30,6 +30,16 @@ const ONE = 10n ** BigInt(SCALE);
 const OPEN = ['open', 'partial'];
 const BOOK_LEVELS = 50;
 const BOARD_OFFERS = 100;
+/** The most characters an offer's description may have. */
+export const DESCRIPTION_MAX = 120;
+
+/** A description as it is kept: one line, no control characters, trimmed. */
+export function cleanDescription(value) {
+  return String(value ?? '')
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /** A non-negative decimal string as an integer of 10^-18. */
 export function units(value) {
@@ -83,7 +93,7 @@ export function fillOrder(order, quantity, price) {
 }
 
 const COLUMNS = `id, exchange_user_id, symbol, side, price::text, quantity::text, filled_quantity::text,
-  filled_quote::text, held::text, status, created_at, updated_at`;
+  filled_quote::text, held::text, status, description, created_at, updated_at`;
 const TRADE_COLUMNS = 'id, symbol, price::text, quantity::text, taker_side, buy_user_id, sell_user_id, executed_at';
 
 function stateOf(row) {
@@ -98,6 +108,7 @@ function stateOf(row) {
     filledQuote: units(row.filled_quote),
     held: units(row.held),
     status: row.status,
+    description: row.description ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -114,6 +125,7 @@ function orderJson(o) {
     filled_quantity: decimal(o.filled),
     filled_quote: decimal(o.filledQuote),
     status: o.status,
+    description: o.description,
     created_at: o.createdAt,
     updated_at: o.updatedAt,
   };
@@ -127,6 +139,7 @@ function offerJson(o) {
     price: decimal(o.price),
     quantity: decimal(o.quantity),
     remaining: decimal(o.quantity - o.filled),
+    description: o.description,
     created_at: o.createdAt,
   };
 }
@@ -251,7 +264,12 @@ export class Auction extends EventEmitter {
     if (!quantity) throw httpError(400, 'invalid_quantity', 'quantity must be a positive number with at most 8 decimals');
     const price = asciiAmount(b.price);
     if (!price) throw httpError(400, 'invalid_price', 'price must be a positive number with at most 8 decimals');
-    return { symbol, side: b.side, price, quantity };
+    if (b.description != null && typeof b.description !== 'string') throw httpError(400, 'invalid_description', 'description must be text');
+    const description = cleanDescription(b.description);
+    if ([...description].length > DESCRIPTION_MAX) {
+      throw httpError(400, 'invalid_description', `description must be at most ${DESCRIPTION_MAX} characters`);
+    }
+    return { symbol, side: b.side, price, quantity, description };
   }
 
   /** Places an auction order and matches it; resolves with { order, trades } as committed. */
@@ -319,9 +337,9 @@ export class Auction extends EventEmitter {
   async #insert(c, exchangeUserId, o, actor) {
     const hold = holdFor(o.side, units(o.price), units(o.quantity));
     const { rows: [row] } = await c.query(
-      `INSERT INTO miniapp_auction_orders (exchange_user_id, symbol, side, price, quantity, held)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
-      [exchangeUserId, o.symbol, o.side, o.price, o.quantity, decimal(hold)],
+      `INSERT INTO miniapp_auction_orders (exchange_user_id, symbol, side, price, quantity, held, description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLUMNS}`,
+      [exchangeUserId, o.symbol, o.side, o.price, o.quantity, decimal(hold), o.description ?? ''],
     );
     await this.wallets.move(c, 'freeze', exchangeUserId, o.side === 'buy' ? 'IRT' : o.symbol.split('_')[0], decimal(hold), {
       referenceType: 'auction_order', referenceId: row.id, reason: `auction ${o.side} order on ${o.symbol}`, actor,

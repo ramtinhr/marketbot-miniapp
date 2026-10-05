@@ -57,6 +57,8 @@ export interface Order {
     filled_quantity: string;
     filled_quote?: string;
     status: OrderStatus;
+    /** Auction orders only: what the poster added to the offer. */
+    description?: string;
     created_at: string;
 }
 export interface PlacedOrder { order: Order | null; trades: MarketTrade[]; type: 'limit' | 'market' }
@@ -65,7 +67,9 @@ export interface PlacedOrder { order: Order | null; trades: MarketTrade[]; type:
 export interface AuctionLevel { price: string; quantity: string; orders: number }
 export interface AuctionBook { symbol: string; bids: AuctionLevel[]; asks: AuctionLevel[]; last_price: string }
 /** One open auction order as the board shows it: "I buy (or sell) `remaining` at `price`". */
-export interface AuctionOffer { id: string; side: Side; price: string; quantity: string; remaining: string; created_at: string }
+export interface AuctionOffer { id: string; side: Side; price: string; quantity: string; remaining: string; description?: string; created_at: string }
+/** The most characters an auction offer's description may have; the server refuses more. */
+export const AUCTION_DESCRIPTION_MAX = 120;
 export interface AuctionMarket { symbol: string; book: AuctionBook; offers: AuctionOffer[]; trades: MarketTrade[] }
 
 /** The server answered with an error; `code` picks the message the app shows. */
@@ -155,7 +159,7 @@ export const api = {
     auction: (symbol: string) => request<AuctionMarket>(`/auction/${symbol}`),
     auctionOrders: (symbol: string | null, scope: 'open' | 'history' | 'all' = 'open') =>
         request<{ orders: Order[] }>(`/auction/orders${query({ symbol, scope })}`),
-    placeAuctionOrder: (body: { symbol: string; side: Side; price: string; quantity: string }) =>
+    placeAuctionOrder: (body: { symbol: string; side: Side; price: string; quantity: string; description?: string }) =>
         post<{ order: Order; trades: MarketTrade[] }>('/auction/orders', body),
     cancelAuctionOrder: (id: string) => post<{ order: Order | null }>(`/auction/orders/${id}/cancel`),
     takeAuctionOffer: (id: string, quantity: string) => post<{ order: Order; trades: MarketTrade[] }>(`/auction/offers/${id}/take`, { quantity }),
