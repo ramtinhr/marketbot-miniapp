@@ -977,49 +977,49 @@ button.balance-card { cursor: pointer; }
 .ab-take:active { filter: brightness(.92); transform: scale(.97); }
 
 .ab-composer { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--separator); }
-.ab-sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 6px; font-size: .95rem; font-weight: 600; line-height: 2; }
-.ab-blank {
-    display: inline-flex;
+/* The post as a sentence, one part per row: "I [buy|sell] USDT / at [price] / for [volume]". */
+.ab-sentence { display: flex; flex-direction: column; gap: 8px; font-size: .92rem; font-weight: 600; }
+.ab-row { display: flex; align-items: center; gap: 10px; }
+.ab-lead { justify-content: space-between; min-height: 40px; }
+.ab-label { flex: none; width: 4.6em; color: var(--subtitle); white-space: nowrap; }
+.ab-sentence .segmented { flex: none; }
+.ab-sentence .segmented button { min-height: 34px; padding: 0 14px; font-size: .86rem; }
+
+.ab-blank, .ab-note-field {
+    display: flex;
+    flex: 1;
     align-items: center;
-    gap: 4px;
-    min-height: 40px;
-    padding: 0 10px;
+    gap: 8px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 12px;
     border: 1.5px solid var(--separator);
     border-radius: 12px;
     background: var(--page);
     transition: border-color .15s, box-shadow .15s;
 }
-.ab-blank:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
-.ab-blank.invalid { border-color: var(--danger); }
-.ab-blank input {
-    width: 8.5ch;
+.ab-blank:focus-within, .ab-note-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+.ab-blank.invalid, .ab-note-field.invalid { border-color: var(--danger); }
+.ab-blank input, .ab-note-field input {
+    flex: 1;
+    width: 100%;
     min-width: 0;
+    height: 40px;
+    padding: 0;
     border: 0;
     outline: 0;
     background: none;
     color: var(--text);
     font: inherit;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
 }
-.ab-unit { color: var(--hint); font-size: .75rem; font-weight: 700; }
-.ab-sentence .segmented { flex: none; }
-.ab-sentence .segmented button { min-height: 34px; padding: 0 12px; font-size: .88rem; }
-.ab-note-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 40px;
-    padding: 0 10px;
-    border: 1.5px solid var(--separator);
-    border-radius: 12px;
-    background: var(--page);
-    transition: border-color .15s, box-shadow .15s;
+.ab-blank input { font-size: 1rem; font-weight: 700; font-variant-numeric: tabular-nums; text-align: left; }
+.ab-note-field input { font-size: .9rem; font-weight: 500; text-align: right; }
+.ab-blank input::placeholder, .ab-note-field input::placeholder {
+    color: color-mix(in srgb, var(--hint) 70%, transparent);
+    font-weight: 500;
+    opacity: 1;
 }
-.ab-note-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
-.ab-note-field.invalid { border-color: var(--danger); }
-.ab-note-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: .88rem; }
-.ab-note-field input::placeholder { color: var(--hint); }
+.ab-unit { flex: none; min-width: 2.6em; color: var(--hint); font-size: .75rem; font-weight: 700; text-align: center; }
 .ab-note-count { flex: none; color: var(--hint); font-size: .72rem; font-variant-numeric: tabular-nums; }
 .ab-note-field.invalid .ab-note-count { color: var(--danger); }
 .ab-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--hint); font-size: .78rem; }

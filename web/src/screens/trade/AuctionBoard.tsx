@@ -164,48 +164,54 @@ function Composer({ symbol, digits, suggest, crossesAt, onPlaced }: {
     return (
         <div className={`ab-composer ${side}`}>
             <div className="ab-sentence">
-                <span>{t('board.compose.i')}</span>
-                <span>{t('board.compose.asset', { asset: assetName(base) })}</span>
-                <span>{t('board.compose.atPrice')}</span>
-                <label className="ab-blank">
-                    <span className="sr-only">{t('trade.price')}</span>
-                    <input
-                        className="ltr" inputMode={digits ? 'decimal' : 'numeric'} autoComplete="off" placeholder="0" value={price}
-                        onChange={(e) => { setPrice(groupTyped(e.target.value, digits)); setTouched(true); setError(null); }}
+                <div className="ab-row ab-lead">
+                    <span>{t('board.compose.i')} {t('board.compose.asset', { asset: assetName(base) })}</span>
+                    <Segmented
+                        className="sides small"
+                        value={side}
+                        onChange={(v) => { setSide(v); setError(null); }}
+                        options={[
+                            { value: 'buy', label: t('board.compose.buy'), tone: 'buy' },
+                            { value: 'sell', label: t('board.compose.sell'), tone: 'sell' },
+                        ]}
                     />
-                    <span className="ab-unit">{t('common.toman')}</span>
+                </div>
+                <label className="ab-row">
+                    <span className="ab-label">{t('board.compose.atPrice')}</span>
+                    <span className="ab-blank">
+                        <input
+                            className="ltr" inputMode={digits ? 'decimal' : 'numeric'} autoComplete="off" placeholder="0" value={price}
+                            onChange={(e) => { setPrice(groupTyped(e.target.value, digits)); setTouched(true); setError(null); }}
+                        />
+                        <span className="ab-unit">{t('common.toman')}</span>
+                    </span>
                 </label>
-                <span>{t('board.compose.volume')}</span>
-                <label className={`ab-blank ${short && q > 0 ? 'invalid' : ''}`}>
-                    <span className="sr-only">{t('trade.amount')}</span>
-                    <input
-                        className="ltr" inputMode={qtyDigits ? 'decimal' : 'numeric'} autoComplete="off" placeholder="0" value={qty}
-                        onChange={(e) => { setQty(groupTyped(e.target.value, qtyDigits)); setError(null); }}
-                    />
-                    <span className="ab-unit">{base}</span>
+                <label className="ab-row">
+                    <span className="ab-label">{t('board.compose.volume')}</span>
+                    <span className={`ab-blank ${short && q > 0 ? 'invalid' : ''}`}>
+                        <input
+                            className="ltr" inputMode={qtyDigits ? 'decimal' : 'numeric'} autoComplete="off" placeholder="0" value={qty}
+                            onChange={(e) => { setQty(groupTyped(e.target.value, qtyDigits)); setError(null); }}
+                        />
+                        <span className="ab-unit">{base}</span>
+                    </span>
                 </label>
-                <Segmented
-                    className="sides small"
-                    value={side}
-                    onChange={(v) => { setSide(v); setError(null); }}
-                    options={[
-                        { value: 'buy', label: t('board.compose.buy'), tone: 'buy' },
-                        { value: 'sell', label: t('board.compose.sell'), tone: 'sell' },
-                    ]}
-                />
+                <label className="ab-row">
+                    <span className="ab-label">{t('board.compose.note')}</span>
+                    <span className={`ab-note-field ${noteLong ? 'invalid' : ''}`}>
+                        <input
+                            dir="rtl" autoComplete="off" enterKeyHint="done" maxLength={AUCTION_DESCRIPTION_MAX + 20} value={note}
+                            placeholder={t('board.compose.notePlaceholder')}
+                            onChange={(e) => { setNote(e.target.value); setError(null); }}
+                        />
+                        {note && (
+                            <span className="ab-note-count ltr" aria-live="polite">
+                                {fmtAsset(noteLength, 'IRT')}/{fmtAsset(AUCTION_DESCRIPTION_MAX, 'IRT')}
+                            </span>
+                        )}
+                    </span>
+                </label>
             </div>
-
-            <label className={`ab-note-field ${noteLong ? 'invalid' : ''}`}>
-                <span className="sr-only">{t('board.compose.note')}</span>
-                <input
-                    dir="auto" autoComplete="off" enterKeyHint="done" value={note}
-                    placeholder={`${t('board.compose.note')} - ${t('board.compose.notePlaceholder')}`}
-                    onChange={(e) => { setNote(e.target.value); setError(null); }}
-                />
-                <span className="ab-note-count" aria-live="polite">
-                    {fmtAsset(noteLength, 'IRT')}/{fmtAsset(AUCTION_DESCRIPTION_MAX, 'IRT')}
-                </span>
-            </label>
 
             <div className="ab-summary">
                 <span>
