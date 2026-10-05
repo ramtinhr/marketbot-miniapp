@@ -24,7 +24,12 @@ if (config.production) {
       KAVENEGAR_API_KEY: config.sms.kavenegarApiKey,
       KAVENEGAR_OTP_TEMPLATE: config.sms.kavenegarTemplate,
     }),
-    ...(config.payments.provider === 'zarinpal' && { ZARINPAL_MERCHANT_ID: config.payments.zarinpalMerchantId }),
+    ...(config.payments.provider === 'kaino' && {
+      KAINO_USERNAME: config.payments.kaino.username,
+      KAINO_PASSWORD: config.payments.kaino.password,
+      KAINO_TENANT: config.payments.kaino.tenant,
+      KAINO_SECRET: config.payments.kaino.secret,
+    }),
   };
   const problems = [];
   const missing = Object.keys(required).filter((k) => !required[k]);
@@ -32,7 +37,9 @@ if (config.production) {
   // Codes in the log would let anyone who reads it sign in as anyone, and the
   // fake gateway credits wallets without money.
   if (config.sms.provider !== 'kavenegar') problems.push(`SMS_PROVIDER must be kavenegar, not "${config.sms.provider}"`);
-  if (config.payments.provider !== 'zarinpal') problems.push(`PAYMENT_PROVIDER must be zarinpal, not "${config.payments.provider}"`);
+  if (config.payments.provider !== 'kaino') problems.push(`PAYMENT_PROVIDER must be kaino, not "${config.payments.provider}"`);
+  // The gateway answers users at this address, so it must be one they reach over TLS.
+  if (config.publicUrl && !config.publicUrl.startsWith('https://')) problems.push(`PUBLIC_URL must be https, not "${config.publicUrl}"`);
   if (problems.length) {
     process.stderr.write(`${JSON.stringify({ level: 'error', time: Date.now(), msg: `NODE_ENV=production: ${problems.join('; ')} - in .env (MINIAPP_ENV)` })}\n`);
     process.exit(1);
@@ -53,10 +60,18 @@ const bootLog = { info: line('info', process.stdout), warn: line('warn', process
 const sms = createSms(config.sms, { production: config.production, log: bootLog });
 const otp = new OtpService(pg, sms, { secret: config.auth.botToken, ...config.otp });
 const wallets = new Wallets(pg);
-const payments = new Payments(pg, wallets, createGateway(config.payments, config), {
+let gateway;
+try {
+  gateway = createGateway(config.payments, { production: config.production, log: bootLog });
+} catch (err) {
+  bootLog.error(`payment gateway: ${err.message} - in .env (MINIAPP_ENV)`);
+  process.exit(1);
+}
+const payments = new Payments(pg, wallets, gateway, {
   publicUrl: config.publicUrl,
   minToman: config.payments.minToman,
   maxToman: config.payments.maxToman,
+  log: bootLog,
 });
 const withdrawals = new Withdrawals(pg, wallets);
 const exchange = new ExchangeBridge({ brokers: config.exchange.brokers, clientId: config.exchange.clientId, log: bootLog });

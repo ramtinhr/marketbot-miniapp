@@ -48,7 +48,7 @@ All of these need a verified session.
 | `GET /wallet/entries?asset&before` | the ledger, newest first, 30 a page |
 | `GET /wallet/charge` | `{min_toman, max_toman, provider, payments}` |
 | `POST /wallet/charge` | `{amount}` (Toman) → `{payment_id, url}`; the app opens `url` (the gateway) in the browser |
-| `GET /payments/callback` | where the gateway returns; verifies and credits once (idempotent), no session |
+| `GET\|POST /payments/callback/:authority` | where the gateway returns; verifies with the gateway and credits once (idempotent), no session |
 | `GET /wallet/withdrawals` | `{networks, withdrawals}` |
 | `POST /wallet/withdrawals/otp` | sends the withdrawal's code |
 | `POST /wallet/withdrawals` | `{asset, amount, network, destination, code}`; Toman goes to a Sheba (`IR` + 24 digits, mod-97 checked). Freezes the amount |
@@ -142,9 +142,11 @@ Production works like the other MarketBot services: CI builds the images, a manu
    nginx switches the domain to HTTPS by itself within five minutes. That site allows Telegram's web clients to frame the app and passes the `/api/v1/market/ws` WebSocket through.
 4. **This repo:** add the secrets and variables below, merge to `main`, wait for CI, then run *Deploy*.
 5. **BotFather:** `/mybots` → the bot → *Bot Settings* → *Configure Mini App* (or *Menu Button*) → `https://app.parscryptoexchange.com`.
-6. **Zarinpal:** register the same domain on the merchant account; the gateway returns the user to `$PUBLIC_URL/api/v1/payments/callback`.
+6. **Kaino:** the gateway returns the user to `$PUBLIC_URL/api/v1/payments/callback/<authority>`; if the merchant account restricts callback domains, allow this one.
 
-With `NODE_ENV=production` (set by the prod compose file) the server refuses to start without `BOT_TOKEN`, `PUBLIC_URL`, `DB_PASSWORD`, `KAFKA_BROKERS`, `KAVENEGAR_API_KEY` and `KAVENEGAR_OTP_TEMPLATE`, and `ZARINPAL_MERCHANT_ID`, or with the console SMS or the fake gateway; `docker logs marketbot-miniapp-server` names what is missing.
+With `NODE_ENV=production` (set by the prod compose file) the server refuses to start without `BOT_TOKEN`, an https `PUBLIC_URL`, `DB_PASSWORD`, `KAFKA_BROKERS`, `KAVENEGAR_API_KEY` and `KAVENEGAR_OTP_TEMPLATE`, and `KAINO_USERNAME`, `KAINO_PASSWORD`, `KAINO_TENANT` and `KAINO_SECRET`, or with a malformed `KAINO_*` URL, the console SMS or the fake gateway; `docker logs marketbot-miniapp-server` names what is missing.
+
+**How a charge is settled** (`src/payments.js`, `src/kaino.js`): the server opens a Kaino charge for the amount in Rial under a random `authority` (`MB-` and 16 hex digits) and sends the user to Kaino's pay page. When the browser comes back to the callback, only the path's authority is used: the server verifies *the charge it stored* (its identifier, amount and Kaino reference) with Kaino, holding the payment's row lock, and credits the wallet once under the idempotency key `miniapp-payment:<id>`. A decline marks the payment failed or cancelled (the bank refunds unverified payments); a verify answer that names another amount or charge, or an unknown state, leaves it pending with the reason in `error` and the answer in `gateway_response`, and is logged as `payment verification unclear`; if Kaino cannot be reached it stays pending and the result page offers to check again. A payment verified whose credit then failed keeps `verified_at` and is credited on the next callback without asking Kaino again.
 
 ### GitHub secrets and variables
 
@@ -178,9 +180,12 @@ DB_NAME=marketbot
 SMS_PROVIDER=kavenegar
 KAVENEGAR_API_KEY=...
 KAVENEGAR_OTP_TEMPLATE=...
-PAYMENT_PROVIDER=zarinpal
-ZARINPAL_MERCHANT_ID=...
-ZARINPAL_SANDBOX=false
+PAYMENT_PROVIDER=kaino
+KAINO_BASE_URL=https://inopay.done.ir
+KAINO_USERNAME=...
+KAINO_PASSWORD=...
+KAINO_TENANT=...
+KAINO_SECRET=...
 KAFKA_BROKERS=127.0.0.1:9092
 # Optional: SERVER_PORT (8090) and WEB_PORT (8082, = MINIAPP_PORT in marketbot-api)
 ```
@@ -198,7 +203,8 @@ Run *Deploy* again with the previous commit's full sha as the image tag; every `
 | `server/src/schema.js` | the `miniapp_*` tables |
 | `server/src/otp.js`, `sms.js` | SMS codes; Kavenegar and the console stand-in |
 | `server/src/wallets.js` | balances and ledger moves on `exchange.wallets` |
-| `server/src/payments.js` | Zarinpal and the fake gateway; charges |
+| `server/src/payments.js` | charges: start, verify, credit once; the fake gateway |
+| `server/src/kaino.js` | the Kaino client (login, signed charge and verify) and its gateway |
 | `server/src/withdrawals.js` | withdrawal requests, Sheba check |
 | `server/src/exchange.js`, `gen/` | the engine's Kafka bridge (from marketbot-api) and its protobufs |
 | `server/src/trading.js`, `hub.js` | market data and orders; the WebSocket fan-out |

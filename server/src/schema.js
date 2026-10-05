@@ -70,6 +70,21 @@ CREATE TABLE IF NOT EXISTS miniapp_payments (
   paid_at          TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS miniapp_payments_user_idx ON miniapp_payments (user_id, created_at DESC);
+-- The gateway's own reference for the charge, set once the gateway accepts it
+-- (until then "authority" is only ours). Rows from before it reached their
+-- gateway exactly when they got an authority, so those are copied over once.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = current_schema() AND table_name = 'miniapp_payments' AND column_name = 'gateway_ref') THEN
+    ALTER TABLE miniapp_payments ADD COLUMN gateway_ref TEXT;
+    UPDATE miniapp_payments SET gateway_ref = authority WHERE authority IS NOT NULL;
+  END IF;
+END $$;
+-- When the gateway confirmed the payment, which may be before the wallet was
+-- credited, and what it answered (credentials stripped), for reconciliation.
+ALTER TABLE miniapp_payments ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE miniapp_payments ADD COLUMN IF NOT EXISTS gateway_response JSONB;
 
 -- Withdrawal requests. The amount is frozen in the wallet when requested; an
 -- operator pays it out (debit from frozen) or rejects it (unfreeze).

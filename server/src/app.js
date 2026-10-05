@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 
 import { httpError } from './errors.js';
+import { AUTHORITY_PATTERN, callbackParams } from './payments.js';
 import { isSymbol } from './trading.js';
 import { NETWORKS } from './withdrawals.js';
 
@@ -211,30 +212,58 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
           return { payment: p };
         });
 
-        // The gateway sends the user's browser back here; no session, the
-        // payment is found by the gateway's own reference and verified with it.
-        api.get('/payments/callback', async (req, reply) => {
-          const { Authority: authority, Status: status } = req.query;
-          const p = await payments.complete(String(authority ?? ''), String(status ?? ''));
-          if (p?.status === 'paid') {
-            req.log.info({ payment: p.id, ref: p.ref_id }, 'wallet charged');
-            hub?.refreshBalances(p.exchange_user_id);
-          }
-          const back = botUsername ? `<a class="primary" href="https://t.me/${escapeHtml(botUsername)}">بازگشت به تلگرام</a>` : '';
-          const ok = p?.status === 'paid';
-          reply.type('text/html; charset=utf-8');
-          return page(
-            ok ? 'پرداخت موفق' : 'پرداخت ناموفق',
-            ok
-              ? `<div class="big">✅</div><h1>کیف پول شما شارژ شد</h1><p>${Number(p.amount_toman).toLocaleString('fa-IR')} تومان</p><p>کد پیگیری: ${escapeHtml(p.ref_id)}</p>${back}`
-              : `<div class="big">❌</div><h1>پرداخت انجام نشد</h1><p>اگر مبلغی از حساب شما کم شده، حداکثر تا ۷۲ ساعت بازمی‌گردد.</p>${back}`,
-          );
+        // The gateway sends the user's browser back here, by GET or by a form
+        // POST; no session. The path names the payment, which is then verified
+        // with the gateway - whatever else the request says is not trusted.
+        await api.register(async (callback) => {
+          callback.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (req, body, done) => {
+            done(null, Object.fromEntries(new URLSearchParams(body)));
+          });
+
+          const returned = async (req, reply) => {
+            const { authority } = req.params;
+            let p = null;
+            let failed = false;
+            try {
+              p = await payments.complete(authority, callbackParams(req.query, req.body));
+            } catch (err) {
+              failed = true;
+              req.log.error({ authority, err: { message: err.message } }, 'payment verification failed - left pending');
+            }
+            if (p?.status === 'paid') {
+              req.log.info({ payment: p.id, ref: p.ref_id }, 'wallet charged');
+              hub?.refreshBalances(p.exchange_user_id);
+            } else if (p) {
+              req.log.info({ payment: p.id, status: p.status }, 'payment returned unpaid');
+            }
+            const back = botUsername ? `<a class="primary" href="https://t.me/${escapeHtml(botUsername)}">بازگشت به تلگرام</a>` : '';
+            reply.type('text/html; charset=utf-8');
+            if (p?.status === 'paid') {
+              return page(
+                'پرداخت موفق',
+                `<div class="big">✅</div><h1>کیف پول شما شارژ شد</h1><p>${Number(p.amount_toman).toLocaleString('fa-IR')} تومان</p><p>کد پیگیری: ${escapeHtml(p.ref_id)}</p>${back}`,
+              );
+            }
+            if (failed || p?.status === 'pending') {
+              const again = AUTHORITY_PATTERN.test(authority) ? `<a class="secondary" href="/api/v1/payments/callback/${escapeHtml(authority)}">بررسی دوباره</a>` : '';
+              return page(
+                'در حال بررسی پرداخت',
+                `<div class="big">⏳</div><h1>پرداخت در حال بررسی است</h1><p>نتیجه به‌زودی در کیف پول شما نمایش داده می‌شود. اگر مبلغی از حساب شما کم شده، یا کیف پول شارژ می‌شود یا مبلغ حداکثر تا ۷۲ ساعت بازمی‌گردد.</p>${again}${back}`,
+              );
+            }
+            return page(
+              'پرداخت ناموفق',
+              `<div class="big">❌</div><h1>پرداخت انجام نشد</h1><p>اگر مبلغی از حساب شما کم شده، حداکثر تا ۷۲ ساعت بازمی‌گردد.</p>${back}`,
+            );
+          };
+          callback.get('/payments/callback/:authority', returned);
+          callback.post('/payments/callback/:authority', returned);
         });
 
         if (payments.gateway.name === 'fake') {
           api.get('/payments/fake/:authority', async (req, reply) => {
-            const authority = escapeHtml(req.params.authority);
-            const to = (status) => `/api/v1/payments/callback?Authority=${authority}&Status=${status}`;
+            if (!AUTHORITY_PATTERN.test(req.params.authority)) throw httpError(404, 'not_found', 'no such payment');
+            const to = (status) => `/api/v1/payments/callback/${req.params.authority}?Status=${status}`;
             reply.type('text/html; charset=utf-8');
             return page(
               'درگاه آزمایشی',

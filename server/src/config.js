@@ -12,12 +12,6 @@ function str(name, fallback) {
   return raw === undefined || raw === '' ? fallback : raw;
 }
 
-function bool(name, fallback) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
-}
-
 const production = str('NODE_ENV', 'development') === 'production';
 
 export const config = {
@@ -75,10 +69,22 @@ export const config = {
   },
 
   payments: {
-    // "zarinpal", or "fake" - a local stand-in gateway for demos, refused in production.
-    provider: str('PAYMENT_PROVIDER', production ? 'zarinpal' : 'fake'),
-    zarinpalMerchantId: str('ZARINPAL_MERCHANT_ID', ''),
-    zarinpalSandbox: bool('ZARINPAL_SANDBOX', !production),
+    // "kaino", or "fake" - a local stand-in gateway for demos, refused in production.
+    provider: str('PAYMENT_PROVIDER', production ? 'kaino' : 'fake'),
+    kaino: {
+      baseUrl: str('KAINO_BASE_URL', 'https://inopay.done.ir'),
+      loginBaseUrl: str('KAINO_LOGIN_BASE_URL', ''),
+      loginPath: str('KAINO_LOGIN_PATH', '/rest/accountChannel/wallet/v1/login'),
+      walletPathPrefix: str('KAINO_WALLET_PATH_PREFIX', '/rest/accountChannel/wallet/v1'),
+      ipgPayPath: str('KAINO_IPG_PAY_PATH', '/rest/accountChannel/wallet/v1/chargeWallet/pay'),
+      username: str('KAINO_USERNAME', ''),
+      password: str('KAINO_PASSWORD', ''),
+      tenant: str('KAINO_TENANT', ''),
+      // The channel key every request is signed with (HMAC-SHA256).
+      secret: str('KAINO_SECRET', ''),
+      // The wall clock Kaino reads localDate on.
+      timeZone: str('KAINO_TIMEZONE', 'Asia/Tehran'),
+    },
     minToman: int('CHARGE_MIN_TOMAN', 10_000),
     maxToman: int('CHARGE_MAX_TOMAN', 50_000_000),
   },
