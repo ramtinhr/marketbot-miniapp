@@ -77,13 +77,13 @@ test('the configuration is checked at boot: bare https origins, every credential
 test('a charge logs in, signs the documented fields and sends the payer to the IPG page', async () => {
   const { calls, fetchImpl } = fakeKaino({
     [BASE.loginPath]: loginOk,
-    '/chargeWallet': () => json(200, { ipgReference: 'IPG 42/x' }),
+    '/chargeWallet': () => json(200, { ipgReference: 'IPG-42' }),
   });
   const gateway = new KainoGateway(new Kaino({ ...BASE, fetchImpl }));
   const { ref, url } = await gateway.request({ authority: 'MB-00112233445566AA', amountToman: 30_000, callbackUrl: 'https://app.test/cb/MB-1' });
 
-  assert.equal(ref, 'IPG 42/x');
-  assert.equal(url, 'https://kaino.test/rest/accountChannel/wallet/v1/chargeWallet/pay?reference=IPG%2042%2Fx');
+  assert.equal(ref, 'IPG-42');
+  assert.equal(url, 'https://kaino.test/rest/accountChannel/wallet/v1/chargeWallet/pay?reference=IPG-42');
   const [login, charge] = calls;
   assert.deepEqual(login.body, { username: BASE.username, password: 'pw', sign: sign({ username: BASE.username, password: 'pw' }, ['username', 'password'], 'secret-key') });
   assert.equal(login.headers.authorization, undefined);
@@ -134,14 +134,35 @@ async function verifyWith(answer, params = {}) {
   return { outcome, call: calls.find((c) => c.path.endsWith('/verify')) };
 }
 
-test('verify asks about the stored charge, never the one the callback names', async () => {
+test('verify signs the stored identifier and amount, whatever the callback claims', async () => {
   const { outcome, call } = await verifyWith(json(200, { status: 'SUCCESS', amount: 300000, rrn: '123456789012', maskedPan: '603799******1234' }), {
-    reference: 'IPG-SOMEONE-ELSES', identifier: 'MB-FFFFFFFFFFFFFFFF', stan: 'S1',
+    reference: 'REF-FROM-KAINO', identifier: 'MB-FFFFFFFFFFFFFFFF', amount: '1', stan: 'S1',
   });
   assert.deepEqual(outcome, { paid: true, refId: '123456789012', cardPan: '603799******1234', raw: { status: 'SUCCESS', amount: 300000, rrn: '123456789012', maskedPan: '603799******1234' } });
   const { sign: signature, ...fields } = call.body;
-  assert.deepEqual(fields, { identifier: VERIFY.authority, tenant: 'TENANT001', amount: '300000.0', reference: 'IPG-STORED', isVerify: true, stan: 'S1' });
+  assert.deepEqual(fields, { identifier: VERIFY.authority, tenant: 'TENANT001', amount: '300000.0', reference: 'REF-FROM-KAINO', isVerify: true, stan: 'S1' });
   assert.equal(signature, sign(fields, ['identifier', 'tenant', 'amount', 'reference', 'isVerify', 'stan'], 'secret-key'));
+});
+
+test('verify falls back to the stored reference when the callback has none, or a malformed one', async () => {
+  for (const params of [{}, { reference: 'a#b' }, { reference: 'x'.repeat(200) }]) {
+    const { call } = await verifyWith(json(200, { status: 'SUCCESS' }), params);
+    assert.equal(call.body.reference, 'IPG-STORED');
+  }
+  const { call } = await verifyWith(json(200, { status: 'SUCCESS' }), { ipgReference: 'IPG-CB' });
+  assert.equal(call.body.reference, 'IPG-CB');
+});
+
+test('Kaino\'s real charge answer - { token, uuid, link } - gives the pay link and the uuid as reference', async () => {
+  const link = 'https://wallet.done.ir/chargeWalletByToken?token=eyJhbGciOiJIUzI1NiJ9.e30.sig';
+  const { fetchImpl } = fakeKaino({
+    [BASE.loginPath]: loginOk,
+    '/chargeWallet': () => json(200, { token: 'eyJhbGciOiJIUzI1NiJ9.e30.sig', uuid: '9f209ec8-acb5-420f-b4a2-f34f62d43700', link }),
+  });
+  const gateway = new KainoGateway(new Kaino({ ...BASE, fetchImpl }));
+  const { ref, url } = await gateway.request({ authority: 'MB-00112233445566AA', amountToman: 10_000, callbackUrl: 'https://a.test' });
+  assert.equal(ref, '9f209ec8-acb5-420f-b4a2-f34f62d43700');
+  assert.equal(url, link);
 });
 
 test('a stan that is not a plain token is left out', async () => {
@@ -172,7 +193,8 @@ test('verify answers: declines fail, anything unclear is left for an operator', 
 });
 
 test('verify throws - the payment stays pending - when Kaino could not really answer', async () => {
-  for (const answer of [json(502), new Response('<html>bad gateway</html>', { status: 500 }), json(404, {}), json(503, { message: 'down' })]) {
+  const badSign = json(500, { exception: 'InvalidSignException', message: 'SystemException', customMessage: 'امضا معتبر نمی باشد' });
+  for (const answer of [json(502), new Response('<html>bad gateway</html>', { status: 500 }), json(404, {}), json(503, { message: 'down' }), badSign]) {
     await assert.rejects(verifyWith(answer), { statusCode: 502 });
   }
   const gateway = new KainoGateway(new Kaino({ ...BASE, fetchImpl: async () => { throw new TypeError('fetch failed'); } }));

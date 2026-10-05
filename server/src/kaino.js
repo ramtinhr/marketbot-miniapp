@@ -293,12 +293,15 @@ export function verifyVerdict(body, { identifier, amountRial }) {
 export function isDeclined(err) {
   const status = err?.kaino?.status;
   if (!status) return false;
+  // A signature Kaino rejects is our fault, not the payer's: the payment may well be paid.
+  if (/sign/i.test(String(err.kaino.body?.exception ?? ''))) return false;
   if (status >= 400 && status < 500) return ![401, 403, 404, 408, 429].includes(status);
   // Kaino answers its own errors with HTTP 500 and a JSON body; a 500 without one, or a 502-504, came from in between.
   return status === 500 && Boolean(err.kaino.body) && typeof err.kaino.body === 'object';
 }
 
 const SAFE_STAN = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_REF = /^[A-Za-z0-9_.:-]{1,128}$/;
 
 /** Kaino as a gateway for Payments. Amounts arrive in Toman and go to Kaino in Rial. */
 export class KainoGateway {
@@ -317,9 +320,10 @@ export class KainoGateway {
     if (verifyVerdict(res, { identifier: authority, amountRial: amountToman * 10 }).verdict === 'failed') {
       throw httpError(502, 'gateway_failed', `kaino refused the charge: ${JSON.stringify(redact(res))}`);
     }
-    const ref = pick(res, ['ipgReference', 'reference']);
-    if (!ref || ref.length > 128) {
-      throw httpError(502, 'gateway_failed', `kaino returned no usable ipgReference: ${JSON.stringify(redact(res))}`);
+    // Kaino answers { token, uuid, link }; older answers carried ipgReference.
+    const ref = pick(res, ['ipgReference', 'reference', 'uuid']);
+    if (!ref || !SAFE_REF.test(ref)) {
+      throw httpError(502, 'gateway_failed', `kaino returned no usable charge reference: ${JSON.stringify(redact(res))}`);
     }
     const link = pick(res, ['link', 'payUrl', 'paymentUrl']);
     let url = this.kaino.payUrl(ref);
@@ -339,17 +343,21 @@ export class KainoGateway {
   /**
    * Resolves with { paid: true, refId, cardPan }, { paid: false, cancelled, reason },
    * or { unclear: true, reason }; throws when Kaino could not be asked, so the
-   * payment stays pending. `params` is the callback's query and body:
-   * attacker-controlled, so it is only read for the optional stan and for
-   * telling a cancel from a failure - what is verified is the stored charge.
+   * payment stays pending. `params` is the callback's query and body, which
+   * anyone can forge: the identifier and amount verified are always the stored
+   * ones, so Kaino ties whatever reference the callback names to this charge;
+   * the callback only supplies that reference, the optional stan, and whether
+   * the payer cancelled.
    */
   async verify({ authority, ref, amountToman, params }) {
     const amountRial = amountToman * 10;
+    const token = (v) => (typeof v === 'string' && SAFE_REF.test(v) ? v : undefined);
+    const reference = token(params.reference) ?? token(params.ipgReference) ?? ref;
     const stan = typeof params.stan === 'string' && SAFE_STAN.test(params.stan) ? params.stan : undefined;
     const cancelled = params.result === 'false' || params.result === false;
     let res;
     try {
-      res = await this.kaino.verifyCharge({ identifier: authority, amountRial, reference: ref, stan });
+      res = await this.kaino.verifyCharge({ identifier: authority, amountRial, reference, stan });
     } catch (err) {
       if (!isDeclined(err)) throw err;
       return { paid: false, cancelled, reason: err.message, raw: redact(err.kaino.body) };
@@ -360,7 +368,7 @@ export class KainoGateway {
     if (verdict === 'unclear') return { unclear: true, reason, raw };
     return {
       paid: true,
-      refId: pick(res, ['rrn', 'RRN', 'referenceNumber', 'retrievalReferenceNumber', 'traceNumber', 'trackingCode']) ?? ref,
+      refId: pick(res, ['rrn', 'RRN', 'referenceNumber', 'retrievalReferenceNumber', 'traceNumber', 'trackingCode']) ?? reference,
       cardPan: maskPan(pick(res, ['maskedPan', 'cardPan', 'cardNumber', 'pan'])),
       raw,
     };
