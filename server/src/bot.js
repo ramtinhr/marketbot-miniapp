@@ -22,6 +22,7 @@ const COMMANDS = [
   { command: 'start', description: 'منوی اصلی' },
   { command: 'balance', description: 'موجودی کیف پول' },
   { command: 'auction', description: 'مزایده' },
+  { command: 'myoffers', description: 'آگهی‌های من در مزایده' },
 ];
 
 // The reply keyboard under the text field. Plain text buttons: a Mini App
@@ -30,17 +31,19 @@ const COMMANDS = [
 const KEYS = {
   open: 'باز کردن مارکت‌بات',
   auction: 'مزایده',
+  mine: 'آگهی‌های من',
   balance: 'موجودی من',
   charge: 'شارژ کیف پول',
 };
 
-// A plain 2 x 2 grid in Telegram's own colours. Buttons are coloured (style
-// "success" / "danger" / "primary") only where they commit to something: confirming
-// a buy or a sell, posting an offer.
+// A plain grid in Telegram's own colours, the auction and the user's offers in
+// it first. Buttons are coloured (style "success" / "danger" / "primary") only
+// where they commit to something: confirming a buy or a sell, posting an offer.
 const KEYBOARD = {
   keyboard: [
-    [{ text: `🔨 ${KEYS.auction}` }, { text: `💰 ${KEYS.balance}` }],
-    [{ text: `💳 ${KEYS.charge}` }, { text: `📱 ${KEYS.open}` }],
+    [{ text: `🔨 ${KEYS.auction}` }, { text: `📋 ${KEYS.mine}` }],
+    [{ text: `💰 ${KEYS.balance}` }, { text: `💳 ${KEYS.charge}` }],
+    [{ text: `📱 ${KEYS.open}` }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -205,6 +208,7 @@ export class Bot {
       switch (text.replace(/^[^\p{L}/]+/u, '')) {
         case KEYS.open: return [this.openMessage(chatId)];
         case KEYS.auction: return [await this.auctionMessage(chatId, msg.from.id)];
+        case KEYS.mine: return [await this.myOffersMessage(chatId, msg.from.id)];
         case KEYS.balance: return [await this.balanceMessage(chatId, msg.from.id)];
         case KEYS.charge: return [this.openMessage(chatId, 'charge')];
       }
@@ -214,9 +218,12 @@ export class Bot {
           return [await this.balanceMessage(chatId, msg.from.id)];
         case '/auction':
           return [await this.auctionMessage(chatId, msg.from.id)];
+        case '/myoffers':
+          return [await this.myOffersMessage(chatId, msg.from.id)];
         case '/start':
           if (payload === 'balance') return [await this.balanceMessage(chatId, msg.from.id)];
           if (payload === 'auction') return [await this.auctionMessage(chatId, msg.from.id)];
+          if (payload === 'myoffers') return [await this.myOffersMessage(chatId, msg.from.id)];
           return [this.welcome(chatId, msg.from)];
       }
       // An amount for the offer being answered, or an offer typed as in the groups.
@@ -251,6 +258,7 @@ export class Bot {
         '<b>مارکت‌بات</b> · خرید و فروش ارز دیجیتال با تومان',
         '',
         '🔨 <b>مزایده</b> — آگهی خرید و فروش، مثل گروه‌های تتر، همین‌جا در چت',
+        '📋 <b>آگهی‌های من</b> — آگهی‌های باز شما؛ حذف تک‌تک یا همه با هم',
         '💰 <b>موجودی</b> — کیف پول شما در یک نگاه',
         '📱 <b>مینی‌اپ</b> — بازار و محدود با دفتر سفارش زنده، شارژ و برداشت',
         '',
@@ -279,6 +287,17 @@ export class Bot {
       chat_id: chatId,
       text: 'مزایده را در مارکت‌بات ببینید:',
       reply_markup: { inline_keyboard: [[{ text: 'ورود به مزایده', web_app: { url: this.appUrl('auction') } }]] },
+    };
+  }
+
+  /** The user's own open auction offers, to withdraw one or all; without the auction, a button into the Mini App's. */
+  async myOffersMessage(chatId, telegramId) {
+    if (this.auction) return { method: 'sendMessage', chat_id: chatId, parse_mode: 'HTML', ...(await this.auction.mine(telegramId)) };
+    return {
+      method: 'sendMessage',
+      chat_id: chatId,
+      text: 'آگهی‌های خود را در مارکت‌بات ببینید:',
+      reply_markup: { inline_keyboard: [[{ text: 'آگهی‌های من', web_app: { url: this.appUrl('myoffers') } }]] },
     };
   }
 

@@ -175,6 +175,31 @@ test('taking an offer fills that offer alone, at its price, and leaves nothing o
   await assert.rejects(auction.take(users.buyer, cheap.order.id, { quantity: '1' }, opts), { code: 'offer_gone' });
 });
 
+test('cancelling all of a user\'s orders releases every hold, on one pair or all, and leaves others\' alone', { skip }, async () => {
+  const usdt = await auction.place(users.seller, { symbol: 'USDT_IRT', side: 'sell', price: '200000', quantity: '5' }, opts);
+  const trx = await auction.place(users.seller, { symbol: 'TRX_IRT', side: 'sell', price: '90000', quantity: '3' }, opts);
+  const other = await auction.place(users.buyer, { symbol: 'USDT_IRT', side: 'buy', price: '50000', quantity: '1' }, opts);
+  const open = await auction.orders(users.seller, { scope: 'open' });
+  const frozen = { USDT: (await balance('seller', 'USDT')).frozen, TRX: (await balance('seller', 'TRX')).frozen };
+
+  const one = await auction.cancelAll(users.seller, { symbol: 'TRX_IRT' }, opts);
+  assert.ok(one.orders.every((o) => o.symbol === 'TRX_IRT' && o.status === 'cancelled'));
+  assert.ok(one.orders.some((o) => o.id === trx.order.id));
+  assert.equal((await balance('seller', 'TRX')).frozen, 0);
+  assert.equal((await balance('seller', 'USDT')).frozen, frozen.USDT, 'other pairs are untouched');
+
+  const rest = await auction.cancelAll(users.seller, {}, opts);
+  assert.equal(one.orders.length + rest.orders.length, open.length);
+  assert.ok(rest.orders.some((o) => o.id === usdt.order.id));
+  assert.equal((await balance('seller', 'USDT')).frozen, 0);
+  assert.deepEqual(await auction.orders(users.seller, { scope: 'open' }), []);
+  assert.deepEqual((await auction.cancelAll(users.seller, {}, opts)).orders, [], 'nothing left to cancel is not an error');
+
+  const [still] = await auction.orders(users.buyer, { symbol: 'USDT_IRT', scope: 'open' });
+  assert.equal(still.id, other.order.id, 'another user\'s order stays open');
+  await auction.cancel(users.buyer, other.order.id, opts);
+});
+
 test('every wallet still equals the sum of its ledger', { skip }, async () => {
   const { rows } = await pg.query(`
     SELECT w.user_id, w.asset, w.available, w.frozen, COALESCE(SUM(e.available_delta), 0) AS a, COALESCE(SUM(e.frozen_delta), 0) AS f

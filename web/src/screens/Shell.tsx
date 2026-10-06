@@ -8,6 +8,7 @@ import { NavProvider, useNav, type OrderType, type Page, type Tab } from '../nav
 import { UserContext } from '../user';
 import { ChargePage } from './Charge';
 import { Home } from './Screens';
+import { AuctionOrdersPage } from './trade/MyOffers';
 import { TradePage } from './trade/Trade';
 import { typeOptions } from './trade/TradeForm';
 import { AssetPage, DepositPage, WalletPage } from './Wallet';
@@ -57,6 +58,7 @@ function PageView({ page }: { page: Page }) {
         case 'charge': return <ChargePage />;
         case 'deposit': return <DepositPage />;
         case 'withdraw': return <WithdrawPage initialAsset={page.asset} />;
+        case 'auctionOrders': return <AuctionOrdersPage />;
     }
 }
 

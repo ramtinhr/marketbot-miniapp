@@ -349,6 +349,11 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
           return reply.code(201).send(placed);
         });
 
+        api.post('/auction/orders/cancel-all', { preHandler: requireVerified }, async (req) => {
+          const symbol = req.body?.symbol && isSymbol(req.body.symbol) ? req.body.symbol : null;
+          return auction.cancelAll(req.session.exchangeUserId, { symbol }, { actor: `miniapp:${req.user.id}` });
+        });
+
         api.post('/auction/orders/:id/cancel', { preHandler: requireVerified }, async (req) =>
           auction.cancel(req.session.exchangeUserId, req.params.id, { actor: `miniapp:${req.user.id}` }));
 

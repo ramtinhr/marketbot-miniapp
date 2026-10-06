@@ -67,7 +67,22 @@ function tradesOf(symbol: string): MarketTrade[] {
 
 // The auction: other users' offers around the mid, and the user's own. Not matched here.
 const auctionOthers: Record<string, Order[]> = {};
-const auctionMine: Order[] = [];
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const auctionMine: Order[] = [
+    { id: id(), symbol: 'USDT_IRT', side: 'buy', price: '101900', quantity: '50', filled_quantity: '0', status: 'open', description: 'فقط تسویهٔ فوری', created_at: ago(12) },
+    { id: id(), symbol: 'BTC_IRT', side: 'sell', price: '7010000000', quantity: '0.004', filled_quantity: '0.001', status: 'partial', description: '', created_at: ago(26 * 60) },
+];
+const auctionClosed: Order[] = [
+    { id: id(), symbol: 'USDT_IRT', side: 'sell', price: '102600', quantity: '30', filled_quantity: '30', filled_quote: '3078000', status: 'filled', description: '', created_at: ago(3 * 60) },
+    { id: id(), symbol: 'TRX_IRT', side: 'buy', price: '25300', quantity: '400', filled_quantity: '150', filled_quote: '3795000', status: 'cancelled', description: '', created_at: ago(2 * 24 * 60) },
+];
+function closeMine(o: Order): Order {
+    const closed = { ...o, status: 'cancelled' as const };
+    auctionMine.splice(auctionMine.indexOf(o), 1);
+    auctionClosed.unshift(closed);
+    pushAuction(o.symbol);
+    return closed;
+}
 function auctionOffers(symbol: string): Order[] {
     if (!auctionOthers[symbol]) {
         const mid = MIDS[symbol];
@@ -181,7 +196,14 @@ async function route(method: string, path: string, body: Record<string, unknown>
         if (o.status === 'open') orders.unshift(o);
         return json({ order: o, trades: [], type: body.type }, 201);
     }
-    if (p === '/auction/orders' && method === 'GET') return json({ orders: auctionMine.filter((o) => o.symbol === (q.get('symbol') ?? o.symbol)) });
+    if (p === '/auction/orders' && method === 'GET') {
+        const scope = q.get('scope') ?? 'open';
+        const list = scope === 'history' ? auctionClosed : scope === 'all' ? [...auctionMine, ...auctionClosed] : auctionMine;
+        return json({ orders: list.filter((o) => o.symbol === (q.get('symbol') ?? o.symbol)) });
+    }
+    if (p === '/auction/orders/cancel-all') {
+        return json({ orders: auctionMine.filter((o) => !body.symbol || o.symbol === body.symbol).map(closeMine) });
+    }
     if (p === '/auction/orders') {
         const o: Order = {
             id: id(), symbol: String(body.symbol), side: body.side as Order['side'], price: String(body.price), quantity: String(body.quantity),
@@ -193,10 +215,8 @@ async function route(method: string, path: string, body: Record<string, unknown>
     }
     const cancelA = /^\/auction\/orders\/(.+)\/cancel$/.exec(p);
     if (cancelA) {
-        const i = auctionMine.findIndex((o) => o.id === cancelA[1]);
-        const [o] = i >= 0 ? auctionMine.splice(i, 1) : [];
-        if (o) pushAuction(o.symbol);
-        return json({ order: o ? { ...o, status: 'cancelled' } : null });
+        const o = auctionMine.find((x) => x.id === cancelA[1]);
+        return json({ order: o ? closeMine(o) : null });
     }
     const take = /^\/auction\/offers\/(.+)\/take$/.exec(p);
     if (take) {

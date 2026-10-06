@@ -32,6 +32,7 @@ function launchScreen(): Launch {
     const screen = new URLSearchParams(window.location.search).get('screen') ?? webApp()?.initDataUnsafe.start_param;
     switch (screen) {
         case 'auction': return { tab: 'trade', orderType: 'auction' };
+        case 'myoffers': return { tab: 'trade', orderType: 'auction', stack: [{ name: 'auctionOrders' }] };
         case 'trade': return { tab: 'trade' };
         case 'wallet': return { tab: 'wallet' };
         case 'charge': return { tab: 'wallet', stack: [{ name: 'charge' }] };
@@ -69,6 +70,7 @@ function previewState(): State | null {
         case 'wallet': return { kind: 'app', user, tab: 'wallet' };
         case 'trade': return { kind: 'app', user, tab: 'trade' };
         case 'auction': return { kind: 'app', user, tab: 'trade', orderType: 'auction' };
+        case 'myoffers': return { kind: 'app', user, tab: 'trade', orderType: 'auction', stack: [{ name: 'auctionOrders' }] };
         case 'asset': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'asset', asset: 'USDT' }] };
         case 'charge': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'charge' }] };
         case 'deposit': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'deposit' }] };

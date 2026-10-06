@@ -162,5 +162,7 @@ export const api = {
     placeAuctionOrder: (body: { symbol: string; side: Side; price: string; quantity: string; description?: string }) =>
         post<{ order: Order; trades: MarketTrade[] }>('/auction/orders', body),
     cancelAuctionOrder: (id: string) => post<{ order: Order | null }>(`/auction/orders/${id}/cancel`),
+    /** Cancels every open auction order of the user, on `symbol` or on every pair; answers with those cancelled. */
+    cancelAllAuctionOrders: (symbol: string | null = null) => post<{ orders: Order[] }>('/auction/orders/cancel-all', symbol ? { symbol } : {}),
     takeAuctionOffer: (id: string, quantity: string) => post<{ order: Order; trades: MarketTrade[] }>(`/auction/offers/${id}/take`, { quantity }),
 };

@@ -7,6 +7,7 @@ import { Bot } from '../src/bot.js';
 const SELL = '11111111-1111-4111-8111-111111111111';
 const BUY = '22222222-2222-4222-8222-222222222222';
 const MINE = '33333333-3333-4333-8333-333333333333';
+const MINE_BTC = '44444444-4444-4444-8444-444444444444';
 
 test('typed offers read as the groups write them', () => {
   const prices = { USDT: 102_000 };
@@ -38,9 +39,20 @@ function makeBot() {
     { id: SELL, side: 'sell', price: '102700', quantity: '25', remaining: '25', description: 'فقط تسویه فوری <کارت>', created_at: '2026-10-04T10:00:00Z' },
   ];
   const owners = { [MINE]: 'u-42', [BUY]: 'u-50', [SELL]: 'u-50' };
+  // User 42's open orders on every pair, newest first: the USDT buy on the board and a part-filled BTC sell.
+  let own = [
+    { id: MINE, symbol: 'USDT_IRT', side: 'buy', price: '101000', quantity: '10', filled_quantity: '0', status: 'open', description: '', created_at: new Date().toISOString() },
+    { id: MINE_BTC, symbol: 'BTC_IRT', side: 'sell', price: '7000000000', quantity: '0.02', filled_quantity: '0.005', status: 'partial', description: 'فقط شبا', created_at: '2026-10-01T08:00:00Z' },
+  ];
   const auction = {
     offers: async () => offers,
-    orders: async (id) => (id === 'u-42' ? [{ id: MINE }] : []),
+    orders: async (id) => (id === 'u-42' ? own : []),
+    cancelAll: async (user, filter, opts) => {
+      calls.push(['cancelAll', user, filter, opts.actor]);
+      const orders = own.map((o) => ({ ...o, status: 'cancelled' }));
+      own = [];
+      return { orders };
+    },
     offer: async (id) => {
       const o = offers.find((x) => x.id === id);
       return o ? { ...o, symbol: 'USDT_IRT', owner: owners[id], open: true } : null;
@@ -284,6 +296,53 @@ test('withdrawing an own offer from the board, and the board needs no account to
   assert.match(stranger.text, /مزایدهٔ تتر/);
   const [take] = await bot.handle(press(`a:t:${SELL}`, 77));
   assert.match(take.text, /ثبت‌نام/);
+});
+
+test('my offers: every pair, newest first, what they hold, a button to withdraw each', async () => {
+  const { bot, calls } = makeBot();
+  const [board] = await bot.handle(message('/auction'));
+  const link = buttons(board).find((b) => b.callback_data === 'a:m:0');
+  assert.match(link.text, /آگهی‌های من \(۲\)/, 'the board counts the user\'s offers on every pair');
+
+  const [card] = await bot.handle(message('/myoffers'));
+  assert.match(card.text, /۲ آگهی باز · مسدود: ۱٬۰۱۰٬۰۰۰ تومان و ۰٫۰۱۵ بیت‌کوین/);
+  assert.match(card.text, /۱\. 🟢 خرید تتر/);
+  assert.match(card.text, /۲\. 🔴 فروش بیت‌کوین · \S+ مهر/, 'an older offer shows its day');
+  assert.match(card.text, /۲۵٪ انجام شده/);
+  assert.match(card.text, /حجم <b>۰٫۰۱۵<\/b>/, 'what is left of it, not what was posted');
+  assert.match(card.text, /💬 <i>فقط شبا<\/i>/);
+  const b = buttons(card);
+  assert.deepEqual(b.filter((x) => x.callback_data?.startsWith('a:mx:')).map((x) => x.callback_data), [`a:mx:${MINE}:0`, `a:mx:${MINE_BTC}:0`]);
+  assert.ok(b.some((x) => x.callback_data === 'a:ma'));
+  assert.equal(b.find((x) => x.web_app).web_app.url, 'https://app.example/?screen=myoffers');
+  assert.ok(b.every((x) => !x.callback_data || Buffer.byteLength(x.callback_data) <= 64));
+
+  const [after, done] = await bot.handle(press(`a:mx:${MINE_BTC}:0`));
+  assert.equal(after.method, 'editMessageText');
+  assert.match(done.text, /حذف شد/);
+  assert.deepEqual(calls, [['cancel', 'u-42', MINE_BTC]]);
+});
+
+test('withdrawing all my offers asks first, says what it releases, then withdraws them all', async () => {
+  const { bot, calls } = makeBot();
+  const [ask] = await bot.handle(press('a:ma'));
+  assert.match(ask.text, /همهٔ آگهی‌های شما حذف شود؟/);
+  assert.match(ask.text, /• ۱٬۰۱۰٬۰۰۰ تومان\n• ۰٫۰۱۵ بیت‌کوین/);
+  assert.equal(calls.length, 0, 'nothing is withdrawn before the confirmation');
+  const yes = buttons(ask)[0];
+  assert.equal(yes.callback_data, 'a:mac');
+  assert.equal(yes.style, 'danger');
+  assert.equal(buttons(ask)[1].callback_data, 'a:m:0', 'cancel goes back to the list');
+
+  const [result] = await bot.handle(press('a:mac'));
+  assert.match(result.text, /۲ آگهی حذف شد/);
+  assert.match(result.text, /آزاد شد: ۱٬۰۱۰٬۰۰۰ تومان و ۰٫۰۱۵ بیت‌کوین/);
+  assert.deepEqual(calls, [['cancelAll', 'u-42', {}, 'bot:42']]);
+
+  const [empty] = await bot.handle(press('a:m:0'));
+  assert.match(empty.text, /آگهی بازی در مزایده ندارید/);
+  const [board] = await bot.handle(message('/auction'));
+  assert.ok(!buttons(board).some((x) => x.callback_data === 'a:m:0'), 'no link to an empty list');
 });
 
 test('whoever posted an offer hears when it is taken', async () => {

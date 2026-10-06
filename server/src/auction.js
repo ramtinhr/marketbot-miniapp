@@ -412,20 +412,58 @@ export class Auction extends EventEmitter {
         const { rows: [row] } = await c.query(`SELECT ${COLUMNS} FROM miniapp_auction_orders WHERE id = $1 FOR UPDATE`, [orderId]);
         const o = stateOf(row);
         if (!OPEN.includes(o.status)) throw httpError(409, 'order_closed', 'the order is already filled or cancelled');
-        if (o.held > 0n) {
-          await this.wallets.move(c, 'unfreeze', exchangeUserId, o.side === 'buy' ? 'IRT' : symbol.split('_')[0], decimal(o.held), {
-            referenceType: 'auction_order', referenceId: o.id, reason: `auction order on ${symbol} cancelled`, actor,
-          });
-        }
-        const { rows: [updated] } = await c.query(
-          `UPDATE miniapp_auction_orders SET status = 'cancelled', held = 0, updated_at = now() WHERE id = $1 RETURNING ${COLUMNS}`,
-          [orderId],
-        );
-        return stateOf(updated);
+        return this.#close(c, o, actor);
       });
     });
     this.#announce(order.symbol, [order], []);
     return { order: orderJson(order) };
+  }
+
+  /**
+   * Cancels every open auction order of a user - on `symbol`, or on every
+   * pair - and releases what they hold. One transaction per pair, under its
+   * lock, so a pair's orders are cancelled together or not at all; resolves
+   * with the orders cancelled, none if there were none.
+   */
+  async cancelAll(exchangeUserId, { symbol = null } = {}, { actor }) {
+    const params = [exchangeUserId, OPEN];
+    const { rows: pairs } = await this.#run(() => this.pg.query(
+      `SELECT DISTINCT symbol FROM miniapp_auction_orders WHERE exchange_user_id = $1 AND status = ANY($2)${symbol ? ' AND symbol = $3' : ''}`,
+      symbol ? [...params, symbol] : params,
+    ));
+    const cancelled = [];
+    for (const { symbol: pair } of pairs) {
+      const orders = await this.#run(() =>
+        withTransaction(this.pg, async (c) => {
+          await this.#lock(c, pair);
+          const { rows } = await c.query(
+            `SELECT ${COLUMNS} FROM miniapp_auction_orders WHERE exchange_user_id = $1 AND symbol = $2 AND status = ANY($3) ORDER BY seq FOR UPDATE`,
+            [exchangeUserId, pair, OPEN],
+          );
+          const closed = [];
+          for (const row of rows) closed.push(await this.#close(c, stateOf(row), actor));
+          return closed;
+        }),
+      );
+      if (orders.length) this.#announce(pair, orders, []);
+      cancelled.push(...orders);
+    }
+    this.log?.info({ user: exchangeUserId, symbol, cancelled: cancelled.length }, 'auction orders cancelled');
+    return { orders: cancelled.map(orderJson) };
+  }
+
+  /** Marks an open order cancelled and releases what it still holds; returns its new state. */
+  async #close(c, o, actor) {
+    if (o.held > 0n) {
+      await this.wallets.move(c, 'unfreeze', o.userId, o.side === 'buy' ? 'IRT' : o.symbol.split('_')[0], decimal(o.held), {
+        referenceType: 'auction_order', referenceId: o.id, reason: `auction order on ${o.symbol} cancelled`, actor,
+      });
+    }
+    const { rows: [updated] } = await c.query(
+      `UPDATE miniapp_auction_orders SET status = 'cancelled', held = 0, updated_at = now() WHERE id = $1 RETURNING ${COLUMNS}`,
+      [o.id],
+    );
+    return stateOf(updated);
   }
 
   #announce(symbol, orders, trades) {

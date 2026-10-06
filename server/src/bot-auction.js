@@ -21,6 +21,8 @@ import { asciiAmount, isSymbol } from './trading.js';
 
 const DEFAULT_SYMBOL = 'USDT_IRT';
 const PAGE = 6;
+/** The most of a user's open offers read at once, for "my offers" and the board. */
+const MINE_MAX = 100;
 const STATE_TTL_MS = 10 * 60_000;
 /** The steps of posting an offer, before its review. */
 const STEPS = ['side', 'price', 'qty', 'note'];
@@ -61,6 +63,24 @@ const priceDigits = (p) => (p >= 1000 ? 0 : p >= 10 ? 2 : p >= 0.1 ? 4 : 8);
 const fa = (n, digits = 0) => Number(n).toLocaleString('fa-IR', { maximumFractionDigits: digits });
 const faInt = (n) => Number(n).toLocaleString('fa-IR');
 const clock = (iso) => new Date(iso).toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' });
+const tehranDay = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Tehran' });
+/** The time if it is today in Tehran, else the day and the time. */
+const when = (iso) => (tehranDay(new Date(iso)) === tehranDay(new Date())
+  ? clock(iso)
+  : `${new Date(iso).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran', month: 'long', day: 'numeric' })} ${clock(iso)}`);
+/** What is left of an order: its quantity less what has filled. */
+const leftOf = (o) => Math.max(0, Number(o.quantity) - Number(o.filled_quantity));
+
+/** What open orders hold, by asset: Toman at its price for what is left of a buy, the coin for a sell. */
+function heldBy(orders) {
+  const held = new Map();
+  for (const o of orders) {
+    const asset = o.side === 'buy' ? 'IRT' : baseOf(o.symbol);
+    held.set(asset, (held.get(asset) ?? 0) + (o.side === 'buy' ? leftOf(o) * Number(o.price) : leftOf(o)));
+  }
+  return [...held].sort(([a], [b]) => (a === 'IRT' ? -1 : b === 'IRT' ? 1 : a.localeCompare(b)))
+    .map(([asset, amount]) => (asset === 'IRT' ? `${faInt(Math.round(amount))} تومان` : `${fa(amount, qtyDigits(asset))} ${nameOf(asset)}`));
+}
 
 /** `n` rounded down to `digits` places, as an ASCII amount; '' if nothing is left. */
 export function floorAmount(n, digits) {
@@ -243,7 +263,8 @@ export class AuctionChat {
   async board(telegramId, symbol = DEFAULT_SYMBOL, filter = 'a', page = 0) {
     const base = baseOf(symbol);
     const [offers, me] = await Promise.all([this.auction.offers(symbol), this.account(telegramId)]);
-    const mine = me.id ? new Set((await this.auction.orders(me.id, { symbol, scope: 'open' })).map((o) => o.id)) : new Set();
+    const own = me.id ? await this.auction.orders(me.id, { scope: 'open', limit: MINE_MAX }) : [];
+    const mine = new Set(own.map((o) => o.id));
     const list = offers.filter((o) => filter === 'a' || o.side === (filter === 'b' ? 'buy' : 'sell'));
     const pages = Math.max(1, Math.ceil(list.length / PAGE));
     const at = Math.min(Math.max(0, page), pages - 1);
@@ -279,6 +300,7 @@ export class AuctionChat {
       { text: '➕ ثبت آگهی', style: 'primary', callback_data: `a:post:${symbol}` },
       { text: '↻ تازه‌سازی', callback_data: `a:b:${symbol}:${filter}:${at}` },
     ]);
+    if (own.length) rows.push([{ text: `📋 آگهی‌های من (${faInt(own.length)})`, callback_data: 'a:m:0' }]);
     rows.push([
       { text: `بازار: ${nameOf(base)} ▾`, callback_data: 'a:pairs' },
       { text: 'در مینی‌اپ', web_app: { url: this.appUrl('auction') } },
@@ -293,6 +315,96 @@ export class AuctionChat {
       rows.push(syms.slice(i, i + 3).map((s) => ({ text: nameOf(baseOf(s)), callback_data: `a:b:${s}:a:0` })));
     }
     return { text: '<b>بازار مزایده را انتخاب کنید</b>', reply_markup: { inline_keyboard: rows } };
+  }
+
+  // ---- The user's own offers ------------------------------------------------
+
+  /** The user's open offers on every pair, newest first: one button each to withdraw it, one for all of them. */
+  async mine(telegramId, page = 0) {
+    const me = await this.account(telegramId);
+    if (me.error) return this.#accountCard(me.error);
+    const orders = await this.auction.orders(me.id, { scope: 'open', limit: MINE_MAX });
+    if (!orders.length) {
+      return {
+        text: '<b>📋 آگهی‌های من</b>\n\nآگهی بازی در مزایده ندارید.',
+        reply_markup: { inline_keyboard: [[{ text: '➕ ثبت آگهی', style: 'primary', callback_data: `a:post:${DEFAULT_SYMBOL}` }], this.#back(DEFAULT_SYMBOL)] },
+      };
+    }
+    const pages = Math.ceil(orders.length / PAGE);
+    const at = Math.min(Math.max(0, page), pages - 1);
+    const shown = orders.slice(at * PAGE, at * PAGE + PAGE);
+
+    const lines = [
+      '<b>📋 آگهی‌های من</b>',
+      `<i>${faInt(orders.length)} آگهی باز · مسدود: ${heldBy(orders).join(' و ')}</i>`,
+      '',
+    ];
+    const rows = [];
+    shown.forEach((o, i) => {
+      const n = faInt(at * PAGE + i + 1);
+      const base = baseOf(o.symbol);
+      const filled = Number(o.filled_quantity);
+      const progress = filled > 0 ? ` · <i>${faInt(Math.floor((filled / Number(o.quantity)) * 100))}٪ انجام شده</i>` : '';
+      lines.push(`${n}. ${o.side === 'buy' ? '🟢 خرید' : '🔴 فروش'} ${nameOf(base)} · ${when(o.created_at)}${progress}`);
+      lines.push(sentence({ side: o.side, base, price: o.price, quantity: String(leftOf(o)) }), ...note(o.description), '');
+      const figures = `${fa(leftOf(o), qtyDigits(base))} ${nameOf(base)} × ${fa(o.price, priceDigits(Number(o.price)))}`;
+      rows.push([{ text: `✕ ${n}. حذف · ${figures}`, callback_data: `a:mx:${o.id}:${at}` }]);
+    });
+    if (pages > 1) lines.push(`<i>صفحهٔ ${faInt(at + 1)} از ${faInt(pages)}</i>`);
+
+    if (pages > 1) {
+      const nav = [];
+      if (at > 0) nav.push({ text: '‹ قبلی', callback_data: `a:m:${at - 1}` });
+      if (at < pages - 1) nav.push({ text: 'بعدی ›', callback_data: `a:m:${at + 1}` });
+      rows.push(nav);
+    }
+    if (orders.length > 1) rows.push([{ text: `🗑 حذف همهٔ آگهی‌ها (${faInt(orders.length)})`, callback_data: 'a:ma' }]);
+    rows.push([
+      { text: '↻ تازه‌سازی', callback_data: `a:m:${at}` },
+      { text: 'در مینی‌اپ', web_app: { url: this.appUrl('myoffers') } },
+    ]);
+    rows.push(this.#back(shown[0].symbol));
+    return { text: lines.join('\n'), reply_markup: { inline_keyboard: rows } };
+  }
+
+  /** Before withdrawing every offer: how many, and what it releases. */
+  async cancelAllCard(telegramId) {
+    const me = await this.account(telegramId);
+    if (me.error) return this.#accountCard(me.error);
+    const orders = await this.auction.orders(me.id, { scope: 'open', limit: MINE_MAX });
+    if (!orders.length) return this.mine(telegramId);
+    return {
+      text: [
+        '<b>همهٔ آگهی‌های شما حذف شود؟</b>',
+        '',
+        `${faInt(orders.length)} آگهی باز در مزایده حذف می‌شود و این مبلغ آزاد می‌شود:`,
+        ...heldBy(orders).map((h) => `• ${h}`),
+        '',
+        '<i>آنچه تا الان معامله شده سر جایش می‌ماند؛ فقط باقی‌ماندهٔ آگهی‌ها حذف می‌شود.</i>',
+      ].join('\n'),
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `✓ بله، هر ${faInt(orders.length)} آگهی حذف شود`, style: 'danger', callback_data: 'a:mac' }],
+          [{ text: 'انصراف', callback_data: 'a:m:0' }],
+        ],
+      },
+    };
+  }
+
+  /** Withdraws every open offer of the user, on every pair. */
+  async cancelAll(telegramId) {
+    const me = await this.account(telegramId);
+    if (me.error) return this.#accountCard(me.error);
+    const back = this.#back(DEFAULT_SYMBOL);
+    try {
+      const { orders } = await this.auction.cancelAll(me.id, {}, { actor: `bot:${telegramId}` });
+      const text = orders.length
+        ? [`<b>✓ ${faInt(orders.length)} آگهی حذف شد</b>`, '', `آزاد شد: ${heldBy(orders).join(' و ')}`].join('\n')
+        : 'آگهی بازی نمانده بود.';
+      return { text, reply_markup: { inline_keyboard: [[...back, { text: 'موجودی من', callback_data: 'balance' }]] } };
+    } catch (err) {
+      return { text: errorText(err), reply_markup: { inline_keyboard: [[{ text: '📋 آگهی‌های من', callback_data: 'a:m:0' }], back] } };
+    }
   }
 
   /** Answering an offer: how much of it, as buttons or typed. */
@@ -814,6 +926,23 @@ export class AuctionChat {
           return [done(errorText(err))];
         }
       }
+      case 'm':
+        return [edit(await this.mine(tg, Number(args[0]) || 0)), done()];
+      case 'mx': {
+        const me = await this.account(tg);
+        if (me.error) return [done('حساب شما فعال نیست.')];
+        let notice = 'آگهی حذف شد و مبلغ آن آزاد شد.';
+        try {
+          await this.auction.cancel(me.id, args[0], { actor: `bot:${tg}` });
+        } catch (err) {
+          notice = errorText(err);
+        }
+        return [edit(await this.mine(tg, Number(args[1]) || 0)), done(notice)];
+      }
+      case 'ma':
+        return [edit(await this.cancelAllCard(tg)), done()];
+      case 'mac':
+        return [edit(await this.cancelAll(tg)), done()];
       case 'post': {
         const symbol = isSymbol(args[0]) ? args[0] : DEFAULT_SYMBOL;
         const me = await this.account(tg);
@@ -923,7 +1052,9 @@ export class AuctionChat {
             `${fa(t.quantity, qtyDigits(base))} ${nameOf(base)} به قیمت ${fa(t.price, priceDigits(Number(t.price)))} تومان ${makerSide === 'buy' ? 'خریدید' : 'فروختید'}.`,
             `${makerSide === 'buy' ? 'پرداختی' : 'دریافتی'}: ${faInt(Math.round(total))} تومان`,
           ].join('\n'),
-          reply_markup: { inline_keyboard: [[...this.#back(symbol), { text: 'موجودی من', callback_data: 'balance' }]] },
+          reply_markup: {
+            inline_keyboard: [[...this.#back(symbol), { text: 'موجودی من', callback_data: 'balance' }], [{ text: '📋 آگهی‌های من', callback_data: 'a:m:0' }]],
+          },
         });
       }
     }
