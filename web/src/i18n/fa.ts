@@ -71,6 +71,11 @@ export const fa = {
     'wallet.trade': 'معامله',
     'wallet.assets': 'دارایی‌ها',
     'wallet.worth': '≈ {amount} تومان',
+    'wallet.worthUsdt': '≈ {amount} دلار (USDT)',
+    'wallet.quote': 'نمایش ارزش به',
+    'wallet.quote.IRT': 'تومان',
+    'wallet.quote.USDT': 'USDT',
+    'wallet.usdtRate': 'نرخ تتر: {rate} تومان',
 
     'asset.available': 'قابل استفاده',
     'asset.inOrders': 'در سفارش‌های باز',
