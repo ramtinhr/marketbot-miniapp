@@ -26,7 +26,7 @@ import { fmtToman } from '../format';
 import { errorMessage, faDigits, formatPhone, t } from '../i18n';
 import { useNav } from '../nav';
 import { webApp } from '../telegram';
-import { balanceOf, totalToman, useWallet } from '../wallet';
+import { balanceOf, fmtQuote, inQuote, totalToman, useQuote, useWallet } from '../wallet';
 
 function Brand() {
     return (
@@ -201,6 +201,7 @@ function NavRow({ icon, tone, title, body, onClick }: { icon: Icon; tone: Tone; 
 export function Home({ user }: { user: User }) {
     const nav = useNav();
     const { info } = useWallet();
+    const quote = useQuote(info);
     const name = [user.first_name, user.last_name].filter(Boolean).join(' ');
     const joined = new Date(user.created_at);
     return (
@@ -214,8 +215,8 @@ export function Home({ user }: { user: User }) {
             <button type="button" className="balance-card compact" onClick={() => nav.setTab('wallet')}>
                 <span className="balance-head"><span>{t('wallet.total')}</span><WalletIcon /></span>
                 <span className="balance-total">
-                    <strong>{info ? fmtToman(totalToman(info)) : '—'}</strong>
-                    <span>{t('common.toman')}</span>
+                    <strong>{info ? fmtQuote(inQuote(info, totalToman(info), quote), quote) : '—'}</strong>
+                    <span>{t(`wallet.quote.${quote}`)}</span>
                 </span>
                 <span className="balance-sub">{t('wallet.availableToman', { amount: fmtToman(balanceOf(info, 'IRT').available) })}</span>
             </button>

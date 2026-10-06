@@ -6,7 +6,8 @@ import { Alert, CoinIcon, Empty, PageHeader, Spinner, type Icon } from '../compo
 import { assetName, fmtAsset, fmtDateTime, fmtToman, num } from '../format';
 import { t, type MessageKey } from '../i18n';
 import { useNav } from '../nav';
-import { balanceOf, refreshWallet, totalToman, useWallet } from '../wallet';
+import { selection } from '../telegram';
+import { balanceOf, fmtQuote, fmtWorth, inQuote, refreshWallet, setQuote, totalToman, useQuote, useWallet, type Quote } from '../wallet';
 
 function QuickAction({ icon: I, label, onClick, disabled = false }: { icon: Icon; label: string; onClick: () => void; disabled?: boolean }) {
     return (
@@ -17,11 +18,31 @@ function QuickAction({ icon: I, label, onClick, disabled = false }: { icon: Icon
     );
 }
 
+/** Toman or USDT, for every value on the wallet: a small switch on the balance card. */
+function QuoteToggle({ value, usdtRate }: { value: Quote; usdtRate: number }) {
+    return (
+        <div className="quote-toggle" role="radiogroup" aria-label={t('wallet.quote')}>
+            {(['IRT', 'USDT'] as const).map((q) => (
+                <button
+                    key={q} type="button" role="radio" aria-checked={value === q} className={value === q ? 'active' : ''}
+                    disabled={q === 'USDT' && !usdtRate}
+                    onClick={() => { if (value !== q) { selection(); setQuote(q); } }}
+                >
+                    {t(`wallet.quote.${q}`)}
+                </button>
+            ))}
+        </div>
+    );
+}
+
 export function WalletPage() {
     const nav = useNav();
     const { info, error, loading } = useWallet();
+    const quote = useQuote(info);
+    const usdtRate = info?.prices.USDT ?? 0;
     const total = totalToman(info);
     const irt = balanceOf(info, 'IRT');
+    const other: Quote = quote === 'IRT' ? 'USDT' : 'IRT';
 
     // Toman first, then what is held by its worth, then the rest.
     const rows = (info?.assets ?? []).map((asset) => {
@@ -37,14 +58,24 @@ export function WalletPage() {
             <section className="balance-card">
                 <div className="balance-head">
                     <span>{t('wallet.total')}</span>
-                    <button type="button" className="icon-button ghost" onClick={() => void refreshWallet()} aria-label={t('common.refresh')} disabled={loading}>
-                        {loading ? <Spinner small /> : <RefreshIcon />}
-                    </button>
+                    <span className="balance-tools">
+                        <QuoteToggle value={quote} usdtRate={usdtRate} />
+                        <button type="button" className="icon-button ghost" onClick={() => void refreshWallet()} aria-label={t('common.refresh')} disabled={loading}>
+                            {loading ? <Spinner small /> : <RefreshIcon />}
+                        </button>
+                    </span>
                 </div>
-                <div className="balance-total">
-                    <strong>{info ? fmtToman(total) : '—'}</strong>
-                    <span>{t('common.toman')}</span>
+                <div className="balance-total" aria-live="polite">
+                    <strong>{info ? fmtQuote(inQuote(info, total, quote), quote) : '—'}</strong>
+                    <span>{t(`wallet.quote.${quote}`)}</span>
                 </div>
+                {info && usdtRate > 0 && (
+                    <span className="balance-sub">
+                        <bdi dir="rtl">{fmtWorth(inQuote(info, total, other), other)}</bdi>
+                        {' · '}
+                        <bdi dir="rtl">{t('wallet.usdtRate', { rate: fmtToman(usdtRate) })}</bdi>
+                    </span>
+                )}
                 <span className="balance-sub">{t('wallet.availableToman', { amount: fmtToman(irt.available) })}</span>
                 <div className="quick-actions">
                     <QuickAction icon={CreditCardIcon} label={t('wallet.charge')} onClick={() => nav.push({ name: 'charge' })} />
@@ -72,8 +103,8 @@ export function WalletPage() {
                                     </span>
                                     <span className="row-end">
                                         <span className="row-amount">{fmtAsset(amount, asset, { floor: true, trim: asset !== 'IRT' })}</span>
-                                        {asset !== 'IRT' && (
-                                            <span className="row-subtitle">{worth ? t('wallet.worth', { amount: fmtToman(worth) }) : '—'}</span>
+                                        {asset !== quote && (asset !== 'IRT' || worth > 0) && (
+                                            <span className="row-subtitle">{worth ? fmtWorth(inQuote(info, worth, quote), quote) : '—'}</span>
                                         )}
                                     </span>
                                 </button>
@@ -139,7 +170,12 @@ export function AssetPage({ asset }: { asset: string }) {
                     <strong>{fmt(available + frozen + locked)}</strong>
                     <span>{asset === 'IRT' ? t('common.toman') : asset}</span>
                 </div>
-                {asset !== 'IRT' && price > 0 && <span className="hint">{t('wallet.worth', { amount: fmtToman((available + frozen + locked) * price) })}</span>}
+                {asset !== 'IRT' && price > 0 && (
+                    <span className="hint">
+                        {fmtWorth((available + frozen + locked) * price, 'IRT')}
+                        {asset !== 'USDT' && info?.prices.USDT ? ` · ${fmtWorth(inQuote(info, (available + frozen + locked) * price, 'USDT'), 'USDT')}` : ''}
+                    </span>
+                )}
             </section>
 
             <ul className="section">

@@ -618,6 +618,24 @@ li + li > .row::before {
 button.balance-card { cursor: pointer; }
 .balance-head { display: flex; align-items: center; justify-content: space-between; font-size: .85rem; opacity: .85; }
 .balance-head svg { width: 20px; height: 20px; }
+.balance-tools { display: flex; align-items: center; gap: 6px; }
+.quote-toggle { display: flex; padding: 2px; border-radius: 999px; background: rgb(255 255 255 / .16); }
+.quote-toggle button {
+    min-width: 46px;
+    padding: 3px 10px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: #fff;
+    font: inherit;
+    font-size: .74rem;
+    font-weight: 700;
+    opacity: .8;
+    cursor: pointer;
+    transition: background .2s var(--ease), color .2s var(--ease);
+}
+.quote-toggle button.active { background: #fff; color: var(--button); opacity: 1; }
+.quote-toggle button:disabled { opacity: .4; cursor: default; }
 .balance-total { display: flex; align-items: baseline; gap: 8px; }
 .balance-total strong { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .balance-total span { font-size: .9rem; opacity: .85; }
