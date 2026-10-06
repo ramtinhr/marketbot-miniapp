@@ -18,7 +18,8 @@ export type Page =
     | { name: 'asset'; asset: string }
     | { name: 'charge' }
     | { name: 'deposit' }
-    | { name: 'withdraw'; asset?: string };
+    | { name: 'withdraw'; asset?: string }
+    | { name: 'auctionOrders' };
 
 interface Nav {
     tab: Tab;

@@ -934,7 +934,50 @@ button.balance-card { cursor: pointer; }
 .order-progress i { display: block; height: 100%; background: var(--accent); }
 
 /* Auction board: a trading group's posts, others' at the start, the user's at the end. */
-.auction-views { align-self: stretch; }
+.auction-bar { display: flex; align-items: center; gap: 8px; }
+.auction-views { align-self: stretch; flex: 1; min-width: 0; }
+.mo-link {
+    flex: none;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+    color: var(--accent);
+    font: inherit;
+    font-size: .8rem;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+/* My auction offers, on every pair */
+.my-offers { gap: 12px; }
+.mo-pairs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.mo-pairs::-webkit-scrollbar { display: none; }
+.mo-pairs .chip { flex: none; }
+.mo-summary { display: flex; flex-direction: column; gap: 12px; }
+.mo-held { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.mo-held .hint { flex-basis: 100%; font-size: .78rem; }
+.mo-held strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.button.danger-soft { min-height: 46px; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); font-size: .92rem; }
+.mo-order { background: var(--surface); }
+.mo-order.closed { opacity: .92; }
+.mo-pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-size: .85rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.mo-status { margin-inline-start: auto; padding: 0 8px; border-radius: 6px; font-size: .72rem; font-weight: 700; color: var(--hint); background: color-mix(in srgb, var(--hint) 14%, transparent); }
+.mo-status.filled { color: var(--up); background: color-mix(in srgb, var(--up) 14%, transparent); }
+.mo-empty { display: flex; flex-direction: column; gap: 12px; }
 .board { display: flex; flex-direction: column; gap: 12px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--warning) 35%, transparent); }
 .ab-head { margin-bottom: 0; }
 .ab-feed {

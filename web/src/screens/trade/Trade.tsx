@@ -10,6 +10,7 @@ import { confirm, haptic, selection } from '../../telegram';
 import { useAuction } from './auction';
 import { AuctionBoard } from './AuctionBoard';
 import { quoteFrom, quoteOf, useMarket, type MarketState } from './market';
+import { useMyAuctionOrders } from './MyOffers';
 import { OrderBook } from './OrderBook';
 import { TradeForm, type PriceRequest } from './TradeForm';
 
@@ -200,6 +201,8 @@ export function TradePage() {
     const auctionQuote = quoteFrom(auction.book, auction.trades);
     const digits = priceDigits(quote.bestAsk || quote.bestBid || quote.last || auctionQuote.mid || 0);
     const orders = auctionMode ? auction.orders : s.orders;
+    const { orders: myOrders } = useMyAuctionOrders(auctionMode);
+    const openMine = () => { selection(); nav.push({ name: 'auctionOrders' }); };
 
     useEffect(() => {
         api.symbols().then((r) => setSymbols(r.symbols)).catch(() => {});
@@ -210,15 +213,20 @@ export function TradePage() {
             <Ticker symbol={symbol} s={s} digits={digits} onPair={() => { selection(); setPicking(true); }} />
             {(auctionMode ? auction.error : s.error) && <p className="tf-error">{errorMessage((auctionMode ? auction.error : s.error) as string)}</p>}
             {auctionMode && (
-                <Segmented
-                    className="auction-views"
-                    value={auctionView}
-                    onChange={setAuctionView}
-                    options={[
-                        { value: 'board', label: t('board.view.board') },
-                        { value: 'book', label: t('board.view.book') },
-                    ]}
-                />
+                <div className="auction-bar">
+                    <Segmented
+                        className="auction-views"
+                        value={auctionView}
+                        onChange={setAuctionView}
+                        options={[
+                            { value: 'board', label: t('board.view.board') },
+                            { value: 'book', label: t('board.view.book') },
+                        ]}
+                    />
+                    <button type="button" className="mo-link" onClick={openMine}>
+                        {myOrders?.length ? t('mine.linkCount', { n: fmtAsset(myOrders.length, 'IRT') }) : t('mine.link')}
+                    </button>
+                </div>
             )}
 
             <div className={`trade-grid ${board ? 'with-board' : ''}`}>
@@ -257,7 +265,12 @@ export function TradePage() {
                     />
                     {tab === 'orders'
                         ? auctionMode
-                            ? <OpenOrders symbol={symbol} orders={auction.orders} digits={digits} cancelOrder={api.cancelAuctionOrder} onCancelled={applyAuctionOrder} />
+                            ? (
+                                <>
+                                    <OpenOrders symbol={symbol} orders={auction.orders} digits={digits} cancelOrder={api.cancelAuctionOrder} onCancelled={applyAuctionOrder} />
+                                    <button type="button" className="link-button block" onClick={openMine}>{t('mine.allLink')} ›</button>
+                                </>
+                            )
                             : <OpenOrders symbol={symbol} orders={s.orders} digits={digits} cancelOrder={api.cancelOrder} onCancelled={applyOrder} />
                         : auctionMode
                             ? <MarketTrades symbol={symbol} trades={auction.trades} fresh={auction.fresh} digits={digits} />

@@ -24,7 +24,7 @@ const cleanNote = (s: string) => s.replace(/\s+/g, ' ').trim();
 const charCount = (s: string) => [...s].length;
 
 /** What the poster added to an offer, under its sentence. */
-function OfferNote({ text }: { text?: string }) {
+export function OfferNote({ text }: { text?: string }) {
     return text ? <p className="ab-note" dir="auto">{text}</p> : null;
 }
 
@@ -37,7 +37,7 @@ function grouped(ascii: string): string {
 }
 
 /** "USDT at 102,350 Toman, 120 of it, I buy" - an offer worded as it would be posted in a trading group. */
-function OfferText({ side, base, price, quantity, digits }: { side: Side; base: string; price: string; quantity: string; digits: number }) {
+export function OfferText({ side, base, price, quantity, digits }: { side: Side; base: string; price: string; quantity: string; digits: number }) {
     return (
         <p className="ab-text">
             {t('board.sentence.lead', { asset: assetName(base) })}{' '}
