@@ -761,7 +761,7 @@ button.balance-card { cursor: pointer; }
 .ticker-price strong {
     min-width: 0;
     font-size: 1.65rem;
-    font-size: clamp(1.3rem, calc((100cqi - 5.5rem) / (var(--len, 8) * .6)), 2.25rem);
+    font-size: clamp(1.3rem, calc((100cqi - 5.5rem) / (var(--len, 8) * .6)), 1.875rem);
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     line-height: 1.15;
@@ -1057,7 +1057,7 @@ button.balance-card { cursor: pointer; }
     .trade-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
     .trade-grid .ob { grid-row: span 2; }
     .ticker { grid-template-columns: auto auto 1fr; align-items: center; gap: 24px; }
-    .ticker-price strong { font-size: 1.9rem; }
+    .ticker-price strong { font-size: 1.5rem; }
     .ticker-stats { gap: 18px; padding-top: 0; border-top: 0; }
 }
 @media (min-width: 1040px) {
