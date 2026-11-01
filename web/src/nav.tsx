@@ -19,7 +19,8 @@ export type Page =
     | { name: 'charge' }
     | { name: 'deposit' }
     | { name: 'withdraw'; asset?: string }
-    | { name: 'auctionOrders' };
+    | { name: 'auctionOrders' }
+    | { name: 'rial' };
 
 interface Nav {
     tab: Tab;

@@ -3,7 +3,7 @@
 // its own, and on every (re)connect says who the user is and which pair to
 // watch again, so callers only subscribe once.
 
-import type { AuctionBook, AuctionOffer, Balance, Depth, MarketTrade, Order } from './api';
+import type { AuctionBook, AuctionOffer, Balance, Depth, MarketTrade, Order, RialOffer, RialOrder, RialTrade } from './api';
 import { currentToken } from './api';
 
 export type LiveMessage =
@@ -16,7 +16,10 @@ export type LiveMessage =
     | { type: 'auction_book'; book: AuctionBook }
     | { type: 'auction_offers'; symbol: string; offers: AuctionOffer[] }
     | { type: 'auction_trades'; symbol: string; trades: MarketTrade[] }
-    | { type: 'auction_user'; symbol: string; orders: Order[]; trades: MarketTrade[] };
+    | { type: 'auction_user'; symbol: string; orders: Order[]; trades: MarketTrade[] }
+    | { type: 'rial_offers'; offers: RialOffer[] }
+    | { type: 'rial_trades'; trades: RialTrade[] }
+    | { type: 'rial_user'; orders: RialOrder[]; trades: RialTrade[] };
 
 type Listener = (msg: LiveMessage) => void;
 
@@ -38,6 +41,7 @@ export function useTransport(factory: (url: string) => Transport): void {
 const listeners = new Set<Listener>();
 let socket: Transport | null = null;
 let symbol: string | null = null;
+let rial = false;
 let retry = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -58,7 +62,7 @@ function connect() {
         retry = 0;
         const token = currentToken();
         if (token) send({ type: 'auth', token });
-        if (symbol) send({ type: 'subscribe', symbol });
+        if (symbol || rial) send({ type: 'subscribe', symbol, rial });
     };
     s.onmessage = (ev) => {
         let msg: LiveMessage;
@@ -99,7 +103,13 @@ export function listen(listener: Listener): () => void {
 /** Watches `next` (a pair such as USDT_IRT) instead of the current one. */
 export function watch(next: string | null): void {
     symbol = next;
-    if (next) send({ type: 'subscribe', symbol: next });
+    send({ type: 'subscribe', symbol: next, rial });
+}
+
+/** Whether this client wants the rial board's live offers. */
+export function watchRial(on: boolean): void {
+    rial = on;
+    send({ type: 'subscribe', symbol, rial });
 }
 
 /** Sends the session token again, e.g. once it is verified. */

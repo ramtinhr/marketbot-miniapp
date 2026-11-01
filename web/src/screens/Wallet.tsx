@@ -80,6 +80,7 @@ export function WalletPage() {
                 <div className="quick-actions">
                     <QuickAction icon={CreditCardIcon} label={t('wallet.charge')} onClick={() => nav.push({ name: 'charge' })} />
                     <QuickAction icon={ArrowDownIcon} label={t('wallet.deposit')} onClick={() => nav.push({ name: 'deposit' })} />
+                    <QuickAction icon={CandlesIcon} label={t('wallet.rial')} onClick={() => nav.push({ name: 'rial' })} />
                     <QuickAction icon={ArrowUpIcon} label={t('wallet.withdraw')} onClick={() => nav.push({ name: 'withdraw' })} />
                     <QuickAction icon={CandlesIcon} label={t('wallet.trade')} onClick={() => nav.openTrade()} />
                 </div>
@@ -126,6 +127,7 @@ function entryLabel(e: LedgerEntry): MessageKey {
 const ENTRY_KEYS: Record<string, true> = Object.fromEntries(
     ['entry.credit.deposit', 'entry.freeze.withdrawal', 'entry.unfreeze.withdrawal', 'entry.debit.withdrawal',
         'entry.freeze.auction_order', 'entry.unfreeze.auction_order', 'entry.trade.auction_trade',
+        'entry.freeze.rial_order', 'entry.unfreeze.rial_order', 'entry.trade.rial_trade',
         'entry.lock', 'entry.unlock', 'entry.trade', 'entry.opening', 'entry.credit', 'entry.debit', 'entry.freeze', 'entry.unfreeze']
         .map((k) => [k, true]),
 );

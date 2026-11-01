@@ -1113,6 +1113,32 @@ button.balance-card { cursor: pointer; }
 .ab-sheet { display: flex; flex-direction: column; gap: 12px; }
 .ab-quote { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border-radius: 14px; background: var(--surface); }
 
+/* Rial / Toman board */
+.rial-page { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.rial-page .ab-feed { flex: 1; min-height: 180px; max-height: 42vh; }
+.rial-sub { margin: -4px 0 0; }
+.rial-filters { display: flex; flex-direction: column; gap: 8px; }
+.rial-methods {
+    display: flex; flex-wrap: wrap; gap: 6px;
+}
+.rial-methods button {
+    appearance: none; border: 0; margin: 0; padding: 7px 10px; border-radius: 999px;
+    background: color-mix(in srgb, var(--hint) 14%, transparent); color: var(--subtitle);
+    font: inherit; font-size: .75rem; font-weight: 700; cursor: pointer;
+}
+.rial-methods button.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.ab-method-row { align-items: flex-start; }
+.ab-method-row .ab-label { padding-top: 8px; }
+.ab-method-row .rial-methods { flex: 1; }
+.rial-method {
+    display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+    background: color-mix(in srgb, var(--hint) 14%, transparent); color: var(--subtitle);
+    font-size: .68rem; font-weight: 700; white-space: nowrap;
+}
+.rial-method.wallet { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.rial-method.p2p { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.ab-meta { flex-wrap: wrap; }
+
 /* Wider screens (Telegram Desktop, tablets): book and trades beside the form, as on the dashboard. */
 @media (min-width: 760px) {
     .trade-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }

@@ -8,6 +8,7 @@ import { Hub } from './hub.js';
 import { OtpService } from './otp.js';
 import { Payments, createGateway } from './payments.js';
 import { TelegramPhotos } from './photos.js';
+import { Rial } from './rial.js';
 import { createSms } from './sms.js';
 import { UserStore } from './store.js';
 import { Trading } from './trading.js';
@@ -77,7 +78,8 @@ const withdrawals = new Withdrawals(pg, wallets);
 const exchange = new ExchangeBridge({ brokers: config.exchange.brokers, clientId: config.exchange.clientId, log: bootLog });
 const trading = new Trading({ pg, exchange, slippageBps: config.exchange.marketSlippageBps, log: bootLog });
 const auction = new Auction({ pg, wallets, log: bootLog });
-const hub = new Hub({ exchange, auction, pg, log: bootLog });
+const rial = new Rial({ pg, wallets, log: bootLog });
+const hub = new Hub({ exchange, auction, rial, pg, log: bootLog });
 const photos = new TelegramPhotos({ botToken: config.auth.botToken, ...config.telegram, log: bootLog });
 const bot = new Bot({
   botToken: config.auth.botToken,
@@ -100,6 +102,7 @@ const app = await buildApp({
   withdrawals,
   trading,
   auction,
+  rial,
   hub,
   photos,
   bot,

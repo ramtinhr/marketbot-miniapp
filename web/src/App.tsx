@@ -36,6 +36,7 @@ function launchScreen(): Launch {
         case 'trade': return { tab: 'trade' };
         case 'wallet': return { tab: 'wallet' };
         case 'charge': return { tab: 'wallet', stack: [{ name: 'charge' }] };
+        case 'rial': return { tab: 'wallet', stack: [{ name: 'rial' }] };
         default: return {};
     }
 }
@@ -75,6 +76,7 @@ function previewState(): State | null {
         case 'charge': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'charge' }] };
         case 'deposit': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'deposit' }] };
         case 'withdraw': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'withdraw' }] };
+        case 'rial': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'rial' }] };
         default: return null;
     }
 }

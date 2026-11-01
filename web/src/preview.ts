@@ -2,7 +2,10 @@
 // with a book that moves and trades that print, so every screen can be seen
 // and worked on in a browser without Telegram, Kafka or the engine.
 
-import type { AuctionBook, AuctionOffer, Balance, Depth, DepthLevel, MarketTrade, Order, Payment, Withdrawal } from './api';
+import type {
+    AuctionBook, AuctionOffer, Balance, Depth, DepthLevel, MarketTrade, Order, Payment,
+    RialMethod, RialOffer, RialOrder, RialSide, Withdrawal,
+} from './api';
 import { useTransport, type Transport } from './live';
 
 const MIDS: Record<string, number> = {
@@ -15,6 +18,7 @@ const STEP: Record<string, number> = { USDT_IRT: 10, USDC_IRT: 10, BTC_IRT: 50_0
 let seq = 0;
 const id = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
 const now = () => new Date().toISOString();
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 const balances: Balance[] = [
     { asset: 'IRT', status: 'active', available: '48250000', frozen: '1500000', locked: '2047000' },
@@ -33,6 +37,26 @@ const payments: Payment[] = [
 const withdrawals: Withdrawal[] = [
     { id: id(), asset: 'IRT', amount: '1500000', network: null, destination: 'IR820540102680020817909002', status: 'pending', note: null, created_at: now() },
 ];
+
+const rialMine: RialOrder[] = [];
+const rialOthers: RialOffer[] = [
+    { id: id(), side: 'have', amount: '5000000', remaining: '5000000', method: 'wallet', description: '', created_at: ago(12) },
+    { id: id(), side: 'want', amount: '2000000', remaining: '2000000', method: 'paya', description: 'فقط پایا', created_at: ago(8) },
+    { id: id(), side: 'have', amount: '10000000', remaining: '7500000', method: 'satna', description: '', created_at: ago(3) },
+    { id: id(), side: 'want', amount: '1500000', remaining: '1500000', method: 'p2p', description: 'تهران، نقد', created_at: ago(1) },
+];
+function rialBoard(): RialOffer[] {
+    return [
+        ...rialOthers,
+        ...rialMine.filter((o) => o.status === 'open' || o.status === 'partial').map((o) => ({
+            id: o.id, side: o.side, amount: o.amount, remaining: o.remaining, method: o.method,
+            description: o.description, created_at: o.created_at,
+        })),
+    ].sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+function pushRial() {
+    liveSocket?.push({ type: 'rial_offers', offers: rialBoard() });
+}
 
 function book(symbol: string): Depth {
     const mid = MIDS[symbol];
@@ -67,7 +91,6 @@ function tradesOf(symbol: string): MarketTrade[] {
 
 // The auction: other users' offers around the mid, and the user's own. Not matched here.
 const auctionOthers: Record<string, Order[]> = {};
-const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const auctionMine: Order[] = [
     { id: id(), symbol: 'USDT_IRT', side: 'buy', price: '101900', quantity: '50', filled_quantity: '0', status: 'open', description: 'فقط تسویهٔ فوری', created_at: ago(12) },
     { id: id(), symbol: 'BTC_IRT', side: 'sell', price: '7010000000', quantity: '0.004', filled_quantity: '0.001', status: 'partial', description: '', created_at: ago(26 * 60) },
@@ -237,6 +260,60 @@ async function route(method: string, path: string, body: Record<string, unknown>
     }
     const auction = /^\/auction\/([A-Z0-9]+_IRT)$/.exec(p);
     if (auction) return json({ symbol: auction[1], book: auctionBook(auction[1]), offers: auctionBoard(auction[1]), trades: [] });
+
+    if (p === '/rial' && method === 'GET') return json({ offers: rialBoard(), trades: [] });
+    if (p === '/rial/orders' && method === 'GET') {
+        return json({ orders: rialMine.filter((o) => (q.get('scope') ?? 'open') !== 'history' || o.status === 'filled' || o.status === 'cancelled') });
+    }
+    if (p === '/rial/orders') {
+        const o: RialOrder = {
+            id: id(), side: body.side as RialSide, amount: String(body.amount), filled_amount: '0', remaining: String(body.amount),
+            method: body.method as RialMethod, destination: (body.destination as string) ?? null, status: 'open',
+            description: String(body.description ?? ''), held: body.side === 'have' && body.method === 'wallet' ? String(body.amount) : '0',
+            created_at: now(), updated_at: now(),
+        };
+        rialMine.unshift(o);
+        pushRial();
+        return json({ order: o, trades: [] }, 201);
+    }
+    const cancelR = /^\/rial\/orders\/(.+)\/cancel$/.exec(p);
+    if (cancelR) {
+        const o = rialMine.find((x) => x.id === cancelR[1]);
+        if (o) {
+            o.status = 'cancelled';
+            o.held = '0';
+            o.updated_at = now();
+        }
+        pushRial();
+        return json({ order: o ?? null });
+    }
+    const takeR = /^\/rial\/offers\/(.+)\/take$/.exec(p);
+    if (takeR) {
+        const maker = rialOthers.find((o) => o.id === takeR[1]) ?? rialMine.find((o) => o.id === takeR[1]);
+        if (!maker || (maker as RialOrder).status === 'cancelled' || (maker as RialOrder).status === 'filled') {
+            return json({ error: 'gone', code: 'offer_gone' }, 409);
+        }
+        const amt = Number(body.amount);
+        const left = Number(maker.remaining);
+        if (amt > left + 1e-9) return json({ error: 'short', code: 'offer_short', remaining: String(left) }, 409);
+        maker.remaining = String(left - amt);
+        if ('filled_amount' in maker) {
+            (maker as RialOrder).filled_amount = String(Number((maker as RialOrder).filled_amount) + amt);
+            (maker as RialOrder).status = Number(maker.remaining) <= 0 ? 'filled' : 'partial';
+        }
+        if (Number(maker.remaining) <= 0) {
+            const i = rialOthers.indexOf(maker as RialOffer);
+            if (i >= 0) rialOthers.splice(i, 1);
+        }
+        pushRial();
+        const order: RialOrder = {
+            id: id(), side: maker.side === 'have' ? 'want' : 'have', amount: String(amt), filled_amount: String(amt),
+            remaining: '0', method: maker.method, destination: (body.destination as string) ?? null, status: 'filled',
+            description: '', held: '0', created_at: now(), updated_at: now(),
+        };
+        return json({ order, trades: [{ id: id(), amount: String(amt), method: maker.method, status: maker.method === 'wallet' ? 'settled' : 'matched', taker_side: order.side, executed_at: now() }] }, 201);
+    }
+
     const cancelO = /^\/orders\/(.+)\/cancel$/.exec(p);
     if (cancelO) {
         const i = orders.findIndex((o) => o.id === cancelO[1]);
@@ -287,8 +364,11 @@ class FakeSocket implements Transport {
     send(data: string) {
         const msg = JSON.parse(data);
         if (msg.type === 'subscribe') {
-            this.symbol = msg.symbol;
-            this.emit({ type: 'depth', depth: book(msg.symbol) });
+            if (msg.symbol) {
+                this.symbol = msg.symbol;
+                this.emit({ type: 'depth', depth: book(msg.symbol) });
+            }
+            if (msg.rial) this.emit({ type: 'rial_offers', offers: rialBoard() });
         }
     }
 

@@ -72,6 +72,48 @@ export interface AuctionOffer { id: string; side: Side; price: string; quantity:
 export const AUCTION_DESCRIPTION_MAX = 120;
 export interface AuctionMarket { symbol: string; book: AuctionBook; offers: AuctionOffer[]; trades: MarketTrade[] }
 
+/** How a rial board offer wants Toman received / settled. */
+export type RialMethod = 'wallet' | 'p2p' | 'paya' | 'satna';
+export type RialSide = 'have' | 'want';
+export type RialOrderStatus = 'open' | 'partial' | 'filled' | 'cancelled';
+export interface RialOffer {
+    id: string;
+    side: RialSide;
+    amount: string;
+    remaining: string;
+    method: RialMethod;
+    description?: string;
+    created_at: string;
+}
+export interface RialOrder {
+    id: string;
+    side: RialSide;
+    amount: string;
+    filled_amount: string;
+    remaining: string;
+    method: RialMethod;
+    destination: string | null;
+    status: RialOrderStatus;
+    description?: string;
+    held: string;
+    created_at: string;
+    updated_at: string;
+}
+export interface RialTrade {
+    id: string;
+    amount: string;
+    method: RialMethod;
+    status: 'matched' | 'settled';
+    taker_side: RialSide;
+    destination?: string | null;
+    executed_at: string;
+    side?: RialSide;
+}
+export interface RialBoard { offers: RialOffer[]; trades: RialTrade[] }
+export const RIAL_METHODS: RialMethod[] = ['wallet', 'p2p', 'paya', 'satna'];
+export const RIAL_BANK_METHODS: RialMethod[] = ['paya', 'satna'];
+export const RIAL_DESCRIPTION_MAX = 120;
+
 /** The server answered with an error; `code` picks the message the app shows. */
 export class ApiError extends Error {
     constructor(readonly status: number, readonly code: string, message: string, readonly data: Record<string, unknown> = {}) {
@@ -165,4 +207,14 @@ export const api = {
     /** Cancels every open auction order of the user, on `symbol` or on every pair; answers with those cancelled. */
     cancelAllAuctionOrders: (symbol: string | null = null) => post<{ orders: Order[] }>('/auction/orders/cancel-all', symbol ? { symbol } : {}),
     takeAuctionOffer: (id: string, quantity: string) => post<{ order: Order; trades: MarketTrade[] }>(`/auction/offers/${id}/take`, { quantity }),
+
+    rial: (params: { side?: RialSide | null; method?: RialMethod | null } = {}) =>
+        request<RialBoard>(`/rial${query({ side: params.side, method: params.method })}`),
+    rialOrders: (scope: 'open' | 'history' | 'all' = 'open') =>
+        request<{ orders: RialOrder[] }>(`/rial/orders${query({ scope })}`),
+    placeRialOrder: (body: { side: RialSide; amount: string; method: RialMethod; description?: string; destination?: string }) =>
+        post<{ order: RialOrder; trades: RialTrade[] }>('/rial/orders', body),
+    cancelRialOrder: (id: string) => post<{ order: RialOrder | null }>(`/rial/orders/${id}/cancel`),
+    takeRialOffer: (id: string, body: { amount: string; destination?: string }) =>
+        post<{ order: RialOrder; trades: RialTrade[] }>(`/rial/offers/${id}/take`, body),
 };

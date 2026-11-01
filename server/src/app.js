@@ -39,10 +39,11 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  * @param {{ users: import('./store.js').UserStore, otp?: import('./otp.js').OtpService,
  *           wallets?: import('./wallets.js').Wallets, payments?: import('./payments.js').Payments,
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
- *           auction?: import('./auction.js').Auction, hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
+ *           auction?: import('./auction.js').Auction, rial?: import('./rial.js').Rial,
+ *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
  *           bot?: import('./bot.js').Bot, botUsername?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, hub, photos, bot, botUsername = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, rial, hub, photos, bot, botUsername = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -371,6 +372,37 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
         });
       }
 
+      // ---- Rial board: have / want Toman with a receive method ----------------
+
+      if (rial) {
+        api.get('/rial', async (req) => {
+          const side = req.query.side === 'have' || req.query.side === 'want' ? req.query.side : null;
+          const method = typeof req.query.method === 'string' ? req.query.method : null;
+          const [offers, trades] = await Promise.all([rial.offers({ side, method }), rial.trades()]);
+          return { offers, trades };
+        });
+
+        api.get('/rial/orders', { preHandler: requireVerified }, async (req) => {
+          const scope = ['open', 'history', 'all'].includes(req.query.scope) ? req.query.scope : 'open';
+          return { orders: await rial.orders(req.session.exchangeUserId, { scope }) };
+        });
+
+        api.post('/rial/orders', { preHandler: requireVerified }, async (req, reply) => {
+          const placed = await rial.place(req.session.exchangeUserId, req.body, { actor: `miniapp:${req.user.id}` });
+          req.log.info({ user: req.user.id, order: placed.order.id, side: placed.order.side, method: placed.order.method }, 'rial offer placed');
+          return reply.code(201).send(placed);
+        });
+
+        api.post('/rial/orders/:id/cancel', { preHandler: requireVerified }, async (req) =>
+          rial.cancel(req.session.exchangeUserId, req.params.id, { actor: `miniapp:${req.user.id}` }));
+
+        api.post('/rial/offers/:id/take', { preHandler: requireVerified }, async (req, reply) => {
+          const taken = await rial.take(req.session.exchangeUserId, req.params.id, req.body, { actor: `miniapp:${req.user.id}` });
+          req.log.info({ user: req.user.id, offer: req.params.id, order: taken.order.id }, 'rial offer taken');
+          return reply.code(201).send(taken);
+        });
+      }
+
       // ---- The bot's chat -----------------------------------------------------
 
       // Telegram posts every update here; the reply rides back in the response
@@ -396,13 +428,14 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
       }
 
       // Client -> server: {"type":"auth","token":"..."} (optional, for the
-      // user's own orders and balances) and {"type":"subscribe","symbol":"USDT_IRT"},
-      // sent again to switch pairs. Server -> client: "status", "depth",
-      // "trades", "user" and "balances". The token goes in a message rather
+      // user's own orders and balances), {"type":"subscribe","symbol":"USDT_IRT"}
+      // to watch a pair, and {"type":"subscribe","rial":true} for the rial
+      // board. Server -> client: "status", "depth", "trades", "user",
+      // "balances", auction_* and rial_*. The token goes in a message rather
       // than the URL, which proxies log.
       if (hub) {
         api.get('/market/ws', { websocket: true }, (socket) => {
-          const client = { socket, symbol: null, userId: null };
+          const client = { socket, symbol: null, userId: null, rial: false };
           hub.add(client);
           // Proxies (Cloudflare: 100s) close a connection that says nothing.
           const ping = setInterval(() => socket.ping(), 30_000);
@@ -423,7 +456,12 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
               hub.send(client, { type: 'auth', ok: Boolean(client.userId) });
               if (client.userId) hub.refreshBalances(client.userId);
             } else if (msg?.type === 'subscribe') {
-              client.symbol = isSymbol(msg.symbol) ? msg.symbol : null;
+              if (Object.prototype.hasOwnProperty.call(msg, 'symbol')) {
+                client.symbol = isSymbol(msg.symbol) ? msg.symbol : null;
+              }
+              if (Object.prototype.hasOwnProperty.call(msg, 'rial')) {
+                client.rial = Boolean(msg.rial);
+              }
               hub.snapshot(client);
             }
           });

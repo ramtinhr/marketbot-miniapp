@@ -11,6 +11,7 @@ import { Home } from './Screens';
 import { AuctionOrdersPage } from './trade/MyOffers';
 import { TradePage } from './trade/Trade';
 import { typeOptions } from './trade/TradeForm';
+import { RialBoardPage } from './rial/RialBoard';
 import { AssetPage, DepositPage, WalletPage } from './Wallet';
 import { WithdrawPage } from './Withdraw';
 
@@ -59,6 +60,7 @@ function PageView({ page }: { page: Page }) {
         case 'deposit': return <DepositPage />;
         case 'withdraw': return <WithdrawPage initialAsset={page.asset} />;
         case 'auctionOrders': return <AuctionOrdersPage />;
+        case 'rial': return <RialBoardPage />;
     }
 }
 

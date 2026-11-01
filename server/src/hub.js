@@ -12,11 +12,13 @@ const publicTrade = ({ buy_user_id: _b, sell_user_id: _s, buy_order_id: _bo, sel
 export class Hub {
   /**
    * @param {{ exchange: import('events').EventEmitter & { depth(symbol: string): object|null, status(): object },
-   *           auction?: import('./auction.js').Auction, pg: import('pg').Pool, log: object }} deps
+   *           auction?: import('./auction.js').Auction, rial?: import('./rial.js').Rial,
+   *           pg: import('pg').Pool, log: object }} deps
    */
-  constructor({ exchange, auction, pg, log }) {
+  constructor({ exchange, auction, rial, pg, log }) {
     this.exchange = exchange;
     this.auction = auction;
+    this.rial = rial;
     this.pg = pg;
     this.log = log;
     this.clients = new Set();
@@ -34,6 +36,8 @@ export class Hub {
     exchange.on('status', this.onStatus);
     this.onAuction = (change) => this.#auction(change);
     auction?.on('change', this.onAuction);
+    this.onRial = (change) => this.#rial(change);
+    rial?.on('change', this.onRial);
   }
 
   add(client) {
@@ -56,6 +60,13 @@ export class Hub {
   /** What a client needs straight after subscribing: the current book and its balances. */
   snapshot(client) {
     if (client.symbol) this.send(client, { type: 'depth', depth: this.exchange.depth(client.symbol) });
+    if (client.rial && this.rial) {
+      this.rial.offers().then((offers) => {
+        this.send(client, { type: 'rial_offers', offers });
+      }).catch((err) => {
+        this.log.warn({ err: { message: err.message } }, 'hub: reading the rial board failed');
+      });
+    }
     if (client.userId) this.refreshBalances(client.userId, 0);
   }
 
@@ -122,6 +133,40 @@ export class Hub {
     for (const userId of touched) this.refreshBalances(userId, BALANCE_DEBOUNCE_MS);
   }
 
+  /** The rial board's offers to watchers, and each user's own offers/trades to them. */
+  async #rial({ orders, trades }) {
+    const watching = [...this.clients].filter((c) => c.rial);
+    if (watching.length && this.rial) {
+      try {
+        const offers = await this.rial.offers();
+        for (const c of watching) this.send(c, { type: 'rial_offers', offers });
+      } catch (err) {
+        this.log.warn({ err: { message: err.message } }, 'hub: reading the rial board failed');
+      }
+      if (trades.length) {
+        const pub = trades.map(({ have_user_id: _h, want_user_id: _w, ...t }) => t);
+        for (const c of watching) this.send(c, { type: 'rial_trades', trades: pub });
+      }
+    }
+
+    const touched = new Set(orders.map((o) => o.user_id));
+    for (const t of trades) touched.add(t.have_user_id).add(t.want_user_id);
+    for (const c of this.clients) {
+      if (!c.userId || !touched.has(c.userId)) continue;
+      this.send(c, {
+        type: 'rial_user',
+        orders: orders.filter((o) => o.user_id === c.userId).map(({ user_id: _u, ...o }) => o),
+        trades: trades
+          .filter((t) => t.have_user_id === c.userId || t.want_user_id === c.userId)
+          .map((t) => {
+            const { have_user_id: have, want_user_id: want, ...rest } = t;
+            return { ...rest, side: have === c.userId ? 'have' : 'want' };
+          }),
+      });
+    }
+    for (const userId of touched) this.refreshBalances(userId, BALANCE_DEBOUNCE_MS);
+  }
+
   /** Reads and pushes a user's balances to their sockets, e.g. after a fill or a payment. */
   refreshBalances(userId, delayMs = 0) {
     if (![...this.clients].some((c) => c.userId === userId)) return;
@@ -148,6 +193,7 @@ export class Hub {
     this.exchange.off('event', this.onEvent);
     this.exchange.off('status', this.onStatus);
     this.auction?.off('change', this.onAuction);
+    this.rial?.off('change', this.onRial);
     for (const t of this.balanceTimers.values()) clearTimeout(t);
     for (const c of this.clients) c.socket.close?.();
     this.clients.clear();

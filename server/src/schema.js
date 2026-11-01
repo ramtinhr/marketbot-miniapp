@@ -148,7 +148,63 @@ CREATE INDEX IF NOT EXISTS miniapp_auction_trades_buyer_idx ON miniapp_auction_t
 CREATE INDEX IF NOT EXISTS miniapp_auction_trades_seller_idx ON miniapp_auction_trades (sell_user_id, seq DESC);
 `;
 
-export const SCHEMA = CORE_SCHEMA + AUCTION_SCHEMA;
+export const RIAL_SCHEMA = `
+-- The rial board: peer offers to have or want Toman, each with a receive
+-- method (wallet / p2p / bank rail). Wallet "have" offers freeze IRT; bank and
+-- p2p matches only record a trade for offline settlement.
+CREATE TABLE IF NOT EXISTS miniapp_rial_offers (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq              BIGSERIAL,
+  exchange_user_id UUID NOT NULL,
+  side             TEXT NOT NULL CHECK (side IN ('have', 'want')),
+  amount           NUMERIC(36,18) NOT NULL CHECK (amount > 0),
+  filled_amount    NUMERIC(36,18) NOT NULL DEFAULT 0 CHECK (filled_amount >= 0),
+  held             NUMERIC(36,18) NOT NULL DEFAULT 0 CHECK (held >= 0),
+  method           TEXT NOT NULL CHECK (method IN ('wallet', 'p2p', 'paya', 'satna')),
+  destination      TEXT,
+  description      TEXT NOT NULL DEFAULT '' CHECK (char_length(description) <= 120),
+  status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'filled', 'cancelled')),
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS miniapp_rial_offers_open_idx ON miniapp_rial_offers (method, side, seq DESC)
+  WHERE status IN ('open', 'partial');
+CREATE INDEX IF NOT EXISTS miniapp_rial_offers_user_idx ON miniapp_rial_offers (exchange_user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS miniapp_rial_trades (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq             BIGSERIAL,
+  amount          NUMERIC(36,18) NOT NULL CHECK (amount > 0),
+  method          TEXT NOT NULL CHECK (method IN ('wallet', 'p2p', 'paya', 'satna')),
+  status          TEXT NOT NULL CHECK (status IN ('matched', 'settled')),
+  taker_side      TEXT NOT NULL CHECK (taker_side IN ('have', 'want')),
+  have_offer_id   UUID NOT NULL,
+  want_offer_id   UUID NOT NULL,
+  have_user_id    UUID NOT NULL,
+  want_user_id    UUID NOT NULL,
+  destination     TEXT,
+  executed_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS miniapp_rial_trades_seq_idx ON miniapp_rial_trades (seq DESC);
+CREATE INDEX IF NOT EXISTS miniapp_rial_trades_have_idx ON miniapp_rial_trades (have_user_id, seq DESC);
+CREATE INDEX IF NOT EXISTS miniapp_rial_trades_want_idx ON miniapp_rial_trades (want_user_id, seq DESC);
+-- Dropped "mellat" from the method list; tighten checks if the tables already existed with it.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'miniapp_rial_offers') THEN
+    ALTER TABLE miniapp_rial_offers DROP CONSTRAINT IF EXISTS miniapp_rial_offers_method_check;
+    ALTER TABLE miniapp_rial_offers ADD CONSTRAINT miniapp_rial_offers_method_check
+      CHECK (method IN ('wallet', 'p2p', 'paya', 'satna'));
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'miniapp_rial_trades') THEN
+    ALTER TABLE miniapp_rial_trades DROP CONSTRAINT IF EXISTS miniapp_rial_trades_method_check;
+    ALTER TABLE miniapp_rial_trades ADD CONSTRAINT miniapp_rial_trades_method_check
+      CHECK (method IN ('wallet', 'p2p', 'paya', 'satna'));
+  END IF;
+END $$;
+`;
+
+export const SCHEMA = CORE_SCHEMA + AUCTION_SCHEMA + RIAL_SCHEMA;
 
 /** Applies SCHEMA once per pool; a failure is retried on the next call. */
 export function schemaReady(pg) {
