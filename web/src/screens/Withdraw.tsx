@@ -190,11 +190,12 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
                 <ul className="section"><li><button type="button" className="row tappable" onClick={() => setSheet('kind')}>
                     <BankIcon /><span className="row-text"><span className="row-title">{t('withdraw.recipient')}</span>
                     <span className="row-subtitle">{recipient === 'saved' ? selectedAccount?.label ?? t('withdraw.savedAccount') : recipient === 'other' ? t('withdraw.otherAccount') : t('withdraw.chooseRecipient')}</span></span>
-                    <span className="link-button small">{t('withdraw.changeRecipient')}</span>
+                    <span className="row-action">{t('withdraw.changeRecipient')}</span>
                 </button></li></ul>
                 {recipient === 'saved' && <>
-                    <button type="button" className="button secondary" onClick={() => setSheet('saved')}>{selectedAccount?.label ?? t('withdraw.savedAccount')}</button>
-                    {selectedAccount && <BankCard account={selectedAccount} selected />}
+                    {selectedAccount ? <button type="button" className="bank-card-trigger" aria-label={t('withdraw.changeRecipient')} onClick={() => setSheet('saved')}>
+                        <BankCard account={selectedAccount} selected />
+                    </button> : <button type="button" className="button secondary" onClick={() => setSheet('saved')}>{t('withdraw.savedAccount')}</button>}
                 </>}
                 {recipient === 'other' && <div className="field"><div className="field-head"><label htmlFor="beneficiary">{t('banks.holder')}</label></div>
                     <div className="field-box"><input id="beneficiary" value={beneficiary} maxLength={120} onChange={e => { setBeneficiary(e.target.value); setError(null); }} /></div>

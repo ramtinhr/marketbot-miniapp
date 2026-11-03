@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, ApiError, type LedgerEntry } from '../api';
-import { ArrowDownIcon, ArrowUpIcon, CandlesIcon, CreditCardIcon, RefreshIcon } from '../components/icons';
+import { ArrowDownIcon, ArrowUpIcon, CandlesIcon, ChevronEndIcon, CreditCardIcon, RefreshIcon } from '../components/icons';
 import { Alert, CoinIcon, Empty, PageHeader, Spinner, type Icon } from '../components/ui';
 import { assetName, fmtAsset, fmtDateTime, fmtToman, num } from '../format';
 import { t, type MessageKey } from '../i18n';
@@ -88,7 +88,7 @@ export function WalletPage() {
 
             <ul className="section">
                 <li><button type="button" className="row tappable" onClick={() => nav.push({ name: 'bankAccounts' })}>
-                    <CreditCardIcon /><span className="row-text"><span className="row-title">{t('banks.title')}</span></span>
+                    <CreditCardIcon /><span className="row-text"><span className="row-title">{t('banks.title')}</span></span><ChevronEndIcon className="row-chevron" />
                 </button></li>
             </ul>
             <Alert code={error} />
@@ -252,6 +252,7 @@ export function DepositPage() {
                             <span className="row-title">{t('deposit.toman')}</span>
                             <span className="row-subtitle">{t('deposit.tomanBody')}</span>
                         </span>
+                        <ChevronEndIcon className="row-chevron" />
                     </button>
                 </li>
                 <li className="row">
