@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { api, ApiError, type LedgerEntry } from '../api';
-import { ArrowDownIcon, ArrowUpIcon, CandlesIcon, ChevronEndIcon, CreditCardIcon, RefreshIcon } from '../components/icons';
-import { Alert, CoinIcon, Empty, PageHeader, Spinner, type Icon } from '../components/ui';
+import { ArrowDownIcon, ArrowUpIcon, BankIcon, CandlesIcon, ChevronEndIcon, CreditCardIcon, RefreshIcon } from '../components/icons';
+import { Alert, Badge, CoinIcon, Empty, PageHeader, Spinner, type Icon } from '../components/ui';
 import { assetName, fmtAsset, fmtDateTime, fmtToman, num } from '../format';
 import { t, type MessageKey } from '../i18n';
 import { useNav } from '../nav';
@@ -54,41 +54,52 @@ export function WalletPage() {
     rows.sort((a, b) => (a.asset === 'IRT' ? -1 : b.asset === 'IRT' ? 1 : b.worth - a.worth || b.amount - a.amount));
 
     return (
-        <main className="screen tabbed enter">
-            <section className="balance-card">
-                <div className="balance-head">
-                    <span>{t('wallet.total')}</span>
-                    <span className="balance-tools">
-                        <QuoteToggle value={quote} usdtRate={usdtRate} />
-                        <button type="button" className="icon-button ghost" onClick={() => void refreshWallet()} aria-label={t('common.refresh')} disabled={loading}>
-                            {loading ? <Spinner small /> : <RefreshIcon />}
-                        </button>
-                    </span>
+        <main className="screen tabbed enter wallet-page">
+            <header className="wallet-header">
+                <h1>{t('tabs.wallet')}</h1>
+                <div className="wallet-tools">
+                    <QuoteToggle value={quote} usdtRate={usdtRate} />
+                    <button type="button" className="icon-button ghost" onClick={() => void refreshWallet()} aria-label={t('common.refresh')} disabled={loading}>
+                        {loading ? <Spinner small /> : <RefreshIcon />}
+                    </button>
                 </div>
+            </header>
+
+            <section className="balance-card wallet-summary" aria-label={t('wallet.total')}>
+                <span className="balance-head">{t('wallet.total')}</span>
                 <div className="balance-total" aria-live="polite">
-                    <strong>{info ? fmtQuote(inQuote(info, total, quote), quote) : '—'}</strong>
+                    <strong><bdi>{info ? fmtQuote(inQuote(info, total, quote), quote) : '—'}</bdi></strong>
                     <span>{t(`wallet.quote.${quote}`)}</span>
                 </div>
-                {info && usdtRate > 0 && (
-                    <span className="balance-sub">
-                        <bdi dir="rtl">{fmtWorth(inQuote(info, total, other), other)}</bdi>
-                        {' · '}
-                        <bdi dir="rtl">{t('wallet.usdtRate', { rate: fmtToman(usdtRate) })}</bdi>
-                    </span>
-                )}
-                <span className="balance-sub">{t('wallet.availableToman', { amount: fmtToman(irt.available) })}</span>
-                <div className="quick-actions">
-                    <QuickAction icon={CreditCardIcon} label={t('wallet.charge')} onClick={() => nav.push({ name: 'charge' })} />
-                    <QuickAction icon={ArrowDownIcon} label={t('wallet.deposit')} onClick={() => nav.push({ name: 'deposit' })} />
-                    <QuickAction icon={CandlesIcon} label={t('wallet.rial')} onClick={() => nav.push({ name: 'rial' })} />
-                    <QuickAction icon={ArrowUpIcon} label={t('wallet.withdraw')} onClick={() => nav.push({ name: 'withdraw' })} />
-                    <QuickAction icon={CandlesIcon} label={t('wallet.trade')} onClick={() => nav.openTrade()} />
+                {info && usdtRate > 0 && <div className="wallet-equivalent">
+                    <span aria-hidden="true">≈</span>
+                    <bdi>{fmtQuote(inQuote(info, total, other), other)}</bdi>
+                    <span>{t(`wallet.quote.${other}`)}</span>
+                </div>}
+                <div className="wallet-summary-details">
+                    <div className="wallet-stat">
+                        <span>{t('wallet.availableLabel')}</span>
+                        <strong><bdi>{info ? fmtToman(irt.available) : '—'}</bdi> {t('common.toman')}</strong>
+                    </div>
+                    {usdtRate > 0 && <div className="wallet-stat">
+                        <span>{t('wallet.usdtRateLabel')}</span>
+                        <span><bdi>{fmtToman(usdtRate)}</bdi> {t('common.toman')}</span>
+                    </div>}
                 </div>
             </section>
 
+            <nav className="quick-actions" aria-label={t('wallet.actions')}>
+                <QuickAction icon={CreditCardIcon} label={t('wallet.charge')} onClick={() => nav.push({ name: 'charge' })} />
+                <QuickAction icon={ArrowDownIcon} label={t('wallet.deposit')} onClick={() => nav.push({ name: 'deposit' })} />
+                <QuickAction icon={ArrowUpIcon} label={t('wallet.withdraw')} onClick={() => nav.push({ name: 'withdraw' })} />
+                <QuickAction icon={CandlesIcon} label={t('wallet.trade')} onClick={() => nav.openTrade()} />
+            </nav>
+
             <ul className="section">
-                <li><button type="button" className="row tappable" onClick={() => nav.push({ name: 'bankAccounts' })}>
-                    <CreditCardIcon /><span className="row-text"><span className="row-title">{t('banks.title')}</span></span><ChevronEndIcon className="row-chevron" />
+                <li><button type="button" className="row tappable" onClick={() => nav.push({ name: 'rial' })}>
+                    <Badge icon={BankIcon} tone="accent" />
+                    <span className="row-text"><span className="row-title">{t('wallet.rial')}</span><span className="row-subtitle">{t('wallet.rialHint')}</span></span>
+                    <ChevronEndIcon className="row-chevron" />
                 </button></li>
             </ul>
             <Alert code={error} />

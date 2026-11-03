@@ -199,8 +199,9 @@ svg { flex-shrink: 0; }
     background: var(--separator);
     transform: scaleY(.5);
 }
-.row-text { display: flex; flex: 1; flex-direction: column; min-width: 0; text-align: start; }
+.row-text { display: flex; flex: 1; flex-direction: column; align-items: flex-start; min-width: 0; text-align: start; }
 .row-action { margin-inline-start: auto; flex-shrink: 0; color: var(--accent); font-size: .8rem; font-weight: 600; white-space: nowrap; text-align: end; }
+.row-text > * { max-width: 100%; }
 .row-title { font-weight: 600; font-size: .95rem; line-height: 1.5; }
 .row-subtitle { color: var(--hint); font-size: .84rem; line-height: 1.5; }
 .row-value { margin-inline-start: auto; color: var(--subtitle); font-size: .92rem; white-space: nowrap; }
@@ -619,58 +620,89 @@ li + li > .row::before {
 button.balance-card { cursor: pointer; }
 .balance-head { display: flex; align-items: center; justify-content: space-between; font-size: .85rem; opacity: .85; }
 .balance-head svg { width: 20px; height: 20px; }
-.balance-tools { display: flex; align-items: center; gap: 6px; }
-.quote-toggle { display: flex; padding: 2px; border-radius: 999px; background: rgb(255 255 255 / .16); }
+.wallet-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wallet-header h1 { font-size: 1.3rem; font-weight: 750; }
+.wallet-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.wallet-tools .icon-button { width: 40px; height: 40px; color: var(--subtitle); }
+.quote-toggle { display: flex; padding: 3px; border-radius: 12px; background: color-mix(in srgb, var(--hint) 12%, var(--surface)); }
 .quote-toggle button {
-    min-width: 46px;
-    padding: 3px 10px;
+    min-width: 48px;
+    min-height: 34px;
+    padding: 4px 10px;
     border: 0;
-    border-radius: 999px;
+    border-radius: 9px;
     background: none;
-    color: #fff;
+    color: var(--subtitle);
     font: inherit;
     font-size: .74rem;
-    font-weight: 700;
-    opacity: .8;
+    font-weight: 650;
     cursor: pointer;
     transition: background .2s var(--ease), color .2s var(--ease);
 }
-.quote-toggle button.active { background: #fff; color: var(--button); opacity: 1; }
+.quote-toggle button.active { background: var(--surface); color: var(--accent); box-shadow: 0 1px 4px rgb(0 0 0 / .08); }
 .quote-toggle button:disabled { opacity: .4; cursor: default; }
 .balance-total { display: flex; align-items: baseline; gap: 8px; }
 .balance-total strong { font-size: 2rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .balance-total span { font-size: .9rem; opacity: .85; }
 .balance-sub { font-size: .8rem; opacity: .8; }
 .balance-card.compact .balance-total strong { font-size: 1.6rem; }
-.quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 14px; }
+.wallet-summary { padding: 24px; gap: 10px; }
+.wallet-summary .balance-head { opacity: .8; font-size: .8rem; }
+.wallet-summary .balance-total { min-width: 0; flex-wrap: wrap; column-gap: 8px; row-gap: 0; }
+.wallet-summary .balance-total strong { min-width: 0; max-width: 100%; font-size: clamp(1.65rem, 7.5vw, 2.4rem); letter-spacing: -.025em; overflow-wrap: anywhere; }
+.wallet-equivalent { display: flex; align-items: baseline; gap: 6px; color: rgb(255 255 255 / .75); font-size: .78rem; }
+.wallet-summary-details { display: grid; gap: 10px; margin-top: 8px; padding-top: 16px; border-top: 1px solid rgb(255 255 255 / .18); }
+.wallet-stat { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: .75rem; line-height: 1.6; }
+.wallet-stat > :first-child { color: rgb(255 255 255 / .75); }
+.wallet-stat > :last-child { text-align: end; }
+.wallet-stat strong { font-weight: 650; }
+.quick-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .quick-action {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 0;
+    justify-content: flex-start;
+    gap: 8px;
+    min-width: 0;
+    min-height: 82px;
+    padding: 8px 0;
     border: 0;
+    border-radius: 16px;
     background: none;
-    color: #fff;
+    color: var(--text);
     font: inherit;
-    font-size: .78rem;
+    font-size: .76rem;
     font-weight: 600;
+    text-align: center;
     cursor: pointer;
 }
+.quick-action > span:last-child { line-height: 1.5; white-space: nowrap; }
 .quick-action-icon {
     display: grid;
     place-items: center;
-    width: 46px;
-    height: 46px;
-    border-radius: 15px;
-    background: rgb(255 255 255 / .18);
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 11%, var(--surface));
     transition: transform .15s var(--ease), background .15s;
 }
-.quick-action:active .quick-action-icon { transform: scale(.94); background: rgb(255 255 255 / .28); }
-.quick-action-icon svg { width: 21px; height: 21px; }
+.quick-action:first-child .quick-action-icon { color: var(--button-text); background: var(--button); box-shadow: 0 4px 10px color-mix(in srgb, var(--button) 18%, transparent); }
+.quick-action:active .quick-action-icon { transform: scale(.94); }
+.quick-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.quick-action:disabled { opacity: .45; cursor: default; }
+.quick-action-icon svg { width: 22px; height: 22px; }
+.wallet-page .row-end { flex-shrink: 0; }
+@media (max-width: 360px) {
+    .wallet-summary { padding: 20px; }
+    .wallet-header h1 { font-size: 1.15rem; }
+    .wallet-tools { gap: 4px; }
+    .wallet-stat { gap: 8px; }
+    .quick-actions { gap: 4px; }
+}
 
 .asset-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; text-align: center; }
-.asset-total { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; }
+.asset-total { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 6px; margin-top: 6px; }
 .asset-total strong { font-size: 1.75rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .asset-total span { color: var(--hint); font-weight: 600; }
 
