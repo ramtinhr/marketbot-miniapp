@@ -11,7 +11,6 @@
 import crypto from 'node:crypto';
 
 import { httpError } from './errors.js';
-import { Kaino, KainoGateway } from './kaino.js';
 import { schemaReady } from './schema.js';
 import { withTransaction } from './wallets.js';
 
@@ -19,35 +18,8 @@ export const AUTHORITY_PATTERN = /^MB-[0-9A-F]{16}$/;
 
 const newAuthority = () => `MB-${crypto.randomBytes(8).toString('hex').toUpperCase()}`;
 
-/** A stand-in gateway served by this app itself (see the routes), for demos. Never in production. */
-export class FakeGateway {
-  constructor() {
-    this.name = 'fake';
-  }
-
-  get configured() {
-    return true;
-  }
-
-  async request({ authority }) {
-    // Relative: the app opens it against its own origin.
-    return { ref: authority, url: `/api/v1/payments/fake/${authority}` };
-  }
-
-  async verify({ authority, params }) {
-    if (params.Status !== 'OK') return { paid: false, cancelled: true, reason: 'cancelled on the demo gateway' };
-    return { paid: true, refId: authority.slice(3, 13), cardPan: '603799******1234' };
-  }
-}
-
-export function createGateway({ provider, kaino }, { production, log }) {
-  if (provider === 'fake') {
-    if (production) throw new Error('PAYMENT_PROVIDER=fake is not allowed with NODE_ENV=production');
-    return new FakeGateway();
-  }
-  if (provider === 'kaino') return new KainoGateway(new Kaino({ ...kaino, allowHttp: !production, log }));
-  throw new Error(`unknown PAYMENT_PROVIDER "${provider}" - use kaino or fake`);
-}
+export { createGateway } from './gateways/index.js';
+export { FakeGateway } from './gateways/fake.js';
 
 const PAYMENT_COLUMNS = 'id, provider, amount_toman, status, ref_id, card_pan, created_at, paid_at';
 
@@ -69,12 +41,13 @@ export class Payments {
    * @param {import('pg').Pool} pg
    * @param {import('./wallets.js').Wallets} wallets
    * @param {{ name: string, configured: boolean, request: Function, verify: Function }} gateway
-   * @param {{ publicUrl?: string, minToman: number, maxToman: number, log?: object }} opts
+   * @param {{ publicUrl?: string, minToman: number, maxToman: number, log?: object, gatewayFor?: Function }} opts
    */
-  constructor(pg, wallets, gateway, { publicUrl = '', minToman, maxToman, log }) {
+  constructor(pg, wallets, gateway, { publicUrl = '', minToman, maxToman, log, gatewayFor }) {
     this.pg = pg;
     this.wallets = wallets;
     this.gateway = gateway;
+    this.gatewayFor = gatewayFor;
     this.publicUrl = publicUrl;
     this.minToman = minToman;
     this.maxToman = maxToman;
@@ -130,13 +103,15 @@ export class Payments {
     return withTransaction(this.pg, async (c) => {
       // Held across the gateway call, so one payment is never verified twice at once.
       const { rows } = await c.query(
-        `SELECT id, exchange_user_id, amount_toman, status, gateway_ref, verified_at, ref_id, card_pan
+        `SELECT id, provider, exchange_user_id, amount_toman, status, gateway_ref, verified_at, ref_id, card_pan
            FROM miniapp_payments WHERE authority = $1 FOR UPDATE`,
         [authority],
       );
       const p = rows[0];
       if (!p) return null;
       if (p.status !== 'pending') return this.#public(c, p.id);
+      const gateway = !p.provider || p.provider === this.gateway.name ? this.gateway : this.gatewayFor?.(p.provider);
+      if (!gateway) throw httpError(503, 'gateway_unavailable', 'the stored payment provider is unavailable');
       if (!p.gateway_ref) {
         // The gateway never accepted the charge, so there is nothing that could have been paid.
         await c.query("UPDATE miniapp_payments SET status = 'failed', updated_at = now() WHERE id = $1", [p.id]);
@@ -146,7 +121,7 @@ export class Payments {
       // Verified on an earlier callback whose credit failed: credit it now, without asking again.
       let verified = p.verified_at ? { refId: p.ref_id, cardPan: p.card_pan } : null;
       if (!verified) {
-        const outcome = await this.gateway.verify({ authority, ref: p.gateway_ref, amountToman: Number(p.amount_toman), params });
+        const outcome = await gateway.verify({ authority, ref: p.gateway_ref, amountToman: Number(p.amount_toman), params });
         const raw = outcome.raw ? JSON.stringify(outcome.raw) : null;
         if (outcome.unclear) {
           this.log?.error({ payment: p.id, reason: outcome.reason }, 'payment verification unclear - check it with the gateway');
@@ -175,8 +150,8 @@ export class Payments {
         await this.wallets.move(c, 'credit', p.exchange_user_id, 'IRT', String(p.amount_toman), {
           referenceType: 'deposit',
           referenceId: p.id,
-          reason: `wallet charge via ${this.gateway.name}, ref ${verified.refId}`,
-          actor: `gateway:${this.gateway.name}`,
+          reason: `wallet charge via ${gateway.name}, ref ${verified.refId}`,
+          actor: `gateway:${gateway.name}`,
           idempotencyKey: `miniapp-payment:${p.id}`,
         });
         await c.query(
@@ -190,6 +165,20 @@ export class Payments {
       }
       return this.#public(c, p.id);
     });
+  }
+
+  /** A webhook is a notification to reconcile, never proof that funds arrived. */
+  async notifyIntent(intentId) {
+    if (typeof intentId !== 'string' || !intentId || intentId.length > 200) {
+      throw httpError(400, 'bad_request', 'paymentIntentId is required');
+    }
+    await schemaReady(this.pg);
+    const { rows } = await this.pg.query(
+      "SELECT authority FROM miniapp_payments WHERE provider = 'payment_intents' AND gateway_ref = $1",
+      [intentId],
+    );
+    if (!rows.length) throw httpError(404, 'not_found', 'unknown payment intent');
+    return this.complete(rows[0].authority);
   }
 
   async #public(c, id) {

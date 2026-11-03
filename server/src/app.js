@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import Fastify from 'fastify';
 
 import { httpError } from './errors.js';
@@ -41,9 +42,9 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
  *           auction?: import('./auction.js').Auction, rial?: import('./rial.js').Rial,
  *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
- *           bot?: import('./bot.js').Bot, botUsername?: string, logger?: object|boolean }} deps
+ *           bot?: import('./bot.js').Bot, botUsername?: string, paymentWebhookSecret?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, rial, hub, photos, bot, botUsername = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, rial, hub, photos, bot, botUsername = '', paymentWebhookSecret = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -196,6 +197,23 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
       }
 
       if (payments) {
+        // Configure this URL and shared secret on the Payment Hub app.
+        api.post('/payments/webhook', async (req, reply) => {
+          if (!paymentWebhookSecret) throw httpError(503, 'not_configured', 'payment webhook is not configured');
+          const supplied = req.headers['x-payment-webhook-secret'];
+          const hash = (value) => crypto.createHash('sha256').update(value).digest();
+          if (typeof supplied !== 'string' || !crypto.timingSafeEqual(hash(supplied), hash(paymentWebhookSecret))) {
+            throw httpError(401, 'unauthorized', 'invalid payment webhook secret');
+          }
+          const payment = await payments.notifyIntent(req.body?.paymentIntentId);
+          if (payment?.status === 'paid') hub?.refreshBalances(payment.exchange_user_id);
+          // Ask the sender to retry transient verification or credit failures.
+          if (!payment || payment.status === 'pending') {
+            return reply.code(503).send({ status: 'pending', code: 'payment_pending' });
+          }
+          return { status: payment.status };
+        });
+
         api.get('/wallet/charge', { preHandler: requireVerified }, async (req) => ({
           ...payments.limits(),
           payments: await payments.list(req.user.id),

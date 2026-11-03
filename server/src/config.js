@@ -71,6 +71,11 @@ export const config = {
   payments: {
     // "kaino", or "fake" - a local stand-in gateway for demos, refused in production.
     provider: str('PAYMENT_PROVIDER', production ? 'kaino' : 'fake'),
+    webhookSecret: str('PAYMENT_WEBHOOK_SECRET', ''),
+    paymentIntents: {
+      baseUrl: str('PAYMENT_API_URL', 'http://109.122.254.148:4200'),
+      apiKey: str('PAYMENT_API_KEY', ''),
+    },
     kaino: {
       baseUrl: str('KAINO_BASE_URL', 'https://inopay.done.ir'),
       loginBaseUrl: str('KAINO_LOGIN_BASE_URL', ''),

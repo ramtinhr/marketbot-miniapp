@@ -153,6 +153,59 @@ With `NODE_ENV=production` (set by the prod compose file) the server refuses to 
 
 **How a charge is settled** (`src/payments.js`, `src/kaino.js`): the server opens a Kaino charge for the amount in Rial under a random `authority` (`MB-` and 16 hex digits) and sends the user to Kaino's pay page. When the browser comes back to the callback, only the path's authority is used: the server verifies *the charge it stored* (its identifier, amount and Kaino reference) with Kaino, holding the payment's row lock, and credits the wallet once under the idempotency key `miniapp-payment:<id>`. A decline marks the payment failed or cancelled (the bank refunds unverified payments); a verify answer that names another amount or charge, or an unknown state, leaves it pending with the reason in `error` and the answer in `gateway_response`, and is logged as `payment verification unclear`; if Kaino cannot be reached it stays pending and the result page offers to check again. A payment verified whose credit then failed keeps `verified_at` and is credited on the next callback without asking Kaino again.
 
+### Payment Hub adapter
+
+The gateway factory (`server/src/gateways/index.js`) selects `fake`, direct
+`kaino`, or `payment_intents`. Each adapter implements `name`, `configured`,
+`request()` and `verify()`. Existing payments retain their recorded provider
+when the default changes.
+
+For the Payment Hub at <http://109.122.254.148:4200/swagger/>, configure only
+server-side environment variables:
+
+```dotenv
+PAYMENT_PROVIDER=payment_intents
+PAYMENT_API_URL=http://109.122.254.148:4200
+PAYMENT_API_KEY=<your app API key>
+PAYMENT_WEBHOOK_SECRET=<a long random shared secret>
+```
+
+The adapter posts to `/api/v1/payment-intents` with `x-api-key`,
+`method=kaino_deposit`, the amount converted from Toman to a Rial string,
+and the local authority as `idempotencyKey`. It supplies `successUrl` and
+`cancelUrl` pointing to the existing callback page and returns `paymentUrl`
+to the Mini App. Payout fields are omitted. The API key must never be a
+`VITE_*` variable or committed to the repository.
+
+Configure the Payment Hub to send this webhook after a deposit changes:
+
+```http
+POST https://<your-miniapp-domain>/api/v1/payments/webhook
+Content-Type: application/json
+x-payment-webhook-secret: <PAYMENT_WEBHOOK_SECRET>
+
+{"paymentIntentId":"<the id returned by the Hub>"}
+```
+
+This is the receiving contract defined by this app; the Payment Hub must be
+configured to send this body and header. No session token is required.
+The webhook looks up an existing local Payment Hub charge, calls
+`POST /api/v1/payment-intents/{id}/confirm`, then reads
+`GET /api/v1/payment-intents/{id}`. Browser return callbacks use the same check.
+Only a matching intent (id, `kaino_deposit` method, `IRR` currency and amount)
+with status `succeeded` or `paid` credits the wallet. Other unknown/pending
+statuses stay pending; HTTP 200 alone never establishes payment success.
+These success status names are adapter expectations because the published
+Swagger does not define response schemas; verify them against a paid intent
+before production use.
+
+Duplicate delivery uses the existing row lock and wallet idempotency key, so
+it credits once. The webhook returns 200 for terminal outcomes, 401 for an
+incorrect secret, 404 for an unknown intent, and 503 when verification or
+credit is pending; the sender should retry non-2xx delivery with backoff.
+Configure the same secret on the Hub and the Mini App server. API keys and
+webhook secrets belong in deployment secrets, never in the frontend bundle.
+
 ### GitHub secrets and variables
 
 *Settings → Secrets and variables → Actions.* The deploy job runs in the `production` environment, so these may live there instead (*Settings → Environments → production*), with required reviewers if you want a second pair of eyes on every deploy.

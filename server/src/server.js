@@ -25,6 +25,10 @@ if (config.production) {
       KAVENEGAR_API_KEY: config.sms.kavenegarApiKey,
       KAVENEGAR_OTP_TEMPLATE: config.sms.kavenegarTemplate,
     }),
+    ...(config.payments.provider === 'payment_intents' && {
+      PAYMENT_API_KEY: config.payments.paymentIntents.apiKey,
+      PAYMENT_WEBHOOK_SECRET: config.payments.webhookSecret,
+    }),
     ...(config.payments.provider === 'kaino' && {
       KAINO_USERNAME: config.payments.kaino.username,
       KAINO_PASSWORD: config.payments.kaino.password,
@@ -38,7 +42,7 @@ if (config.production) {
   // Codes in the log would let anyone who reads it sign in as anyone, and the
   // fake gateway credits wallets without money.
   if (config.sms.provider !== 'kavenegar') problems.push(`SMS_PROVIDER must be kavenegar, not "${config.sms.provider}"`);
-  if (config.payments.provider !== 'kaino') problems.push(`PAYMENT_PROVIDER must be kaino, not "${config.payments.provider}"`);
+  if (!['kaino', 'payment_intents'].includes(config.payments.provider)) problems.push(`PAYMENT_PROVIDER must be kaino or payment_intents, not "${config.payments.provider}"`);
   // The gateway answers users at this address, so it must be one they reach over TLS.
   if (config.publicUrl && !config.publicUrl.startsWith('https://')) problems.push(`PUBLIC_URL must be https, not "${config.publicUrl}"`);
   if (problems.length) {
@@ -70,6 +74,7 @@ try {
 }
 const payments = new Payments(pg, wallets, gateway, {
   publicUrl: config.publicUrl,
+  gatewayFor: (provider) => createGateway({ ...config.payments, provider }, { production: config.production, log: bootLog }),
   minToman: config.payments.minToman,
   maxToman: config.payments.maxToman,
   log: bootLog,
@@ -99,6 +104,7 @@ const app = await buildApp({
   otp,
   wallets,
   payments,
+  paymentWebhookSecret: config.payments.webhookSecret,
   withdrawals,
   trading,
   auction,

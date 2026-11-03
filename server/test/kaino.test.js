@@ -376,3 +376,20 @@ test('JSON routes still refuse form bodies', async () => {
   assert.equal(res.statusCode, 415);
   await app.close();
 });
+
+test('callbacks verify through the provider recorded on the payment after changing the default', async () => {
+  const state = { row: { ...pendingRow(), provider: 'kaino' } };
+  const { pool } = fakePool(state);
+  let verified = false;
+  const payments = new Payments(pool, { move: async () => {} }, {
+    name: 'payment_intents', verify: async () => assert.fail('must use the stored provider'),
+  }, {
+    minToman: 1, maxToman: 1e9,
+    gatewayFor: (provider) => {
+      assert.equal(provider, 'kaino');
+      return { name: 'kaino', verify: async () => { verified = true; return { paid: true, refId: 'R1' }; } };
+    },
+  });
+  assert.equal((await payments.complete('MB-00112233445566AA')).status, 'paid');
+  assert.equal(verified, true);
+});
