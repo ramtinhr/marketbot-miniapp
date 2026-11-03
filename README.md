@@ -135,6 +135,24 @@ Production works like the other MarketBot services: CI builds the images, a manu
 | `.github/workflows/ci.yml` | push and pull request to `main` | server tests, web typecheck and build, compose validation; then builds `ghcr.io/<owner>/<repo>/server` and `/web` (pushed on `main` as `latest`, `main` and the commit sha); a Telegram message |
 | `.github/workflows/deploy.yml` | by hand (*Actions → Deploy → Run workflow*, with an image tag) | writes `.env` from `MINIAPP_ENV`, ships the compose file and both images, `docker compose up -d`, waits for `/health/ready`; a Telegram message |
 
+### Image transfer speed
+
+The deploy runner pulls both images, then `deploy/ship-images.sh` sends their
+saved layers over SSH. When `rsync` is installed on the runner and server,
+`<MINIAPP_DEPLOY_PATH>/.image-cache` retains the last deployment's layers.
+The first deploy populates this cache; later deploys transfer only changed
+content (including changed manifests even when a tag such as `latest` is
+reused). Progress and transfer statistics are printed in the deploy log.
+Interrupted transfers retain partial data for the next attempt; images load
+only after a successful sync. Obsolete cached layers are removed after sync.
+
+If `rsync` is missing, deployment falls back to a full gzip/scp archive.
+Install `rsync` on the server to enable incremental transfers; the server
+still needs no registry access. Removing `.image-cache` resets the optimization
+and makes the next deployment send all layers again. Keep room for this cache
+as well as Docker's image storage. No images are deployed by local tests:
+`python3 -m unittest discover -s deploy -p 'test_*.py' -v` uses isolated fixtures.
+
 ### First deploy
 
 1. **Deploy the bot, the engine and marketbot-api first.** The mini app uses the bot's Postgres and Kafka, and the engine must have started once with `EXCHANGE_ENABLED=true` so the `exchange` schema is current - `/health/ready` reports `exchange_schema` until it is.

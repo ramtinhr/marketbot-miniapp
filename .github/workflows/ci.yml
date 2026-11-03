@@ -38,6 +38,11 @@ jobs:
             node --check "$f"
           done
 
+      - name: Test deployment image transfer
+        run: |
+          bash -n deploy/ship-images.sh
+          python3 -m unittest discover -s deploy -p 'test_*.py' -v
+
       - name: Test server
         run: npm test
 

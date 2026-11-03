@@ -92,38 +92,15 @@ jobs:
           scp env.out target:"$DEPLOY_PATH/.env"
           ssh target "chmod 600 '$DEPLOY_PATH/.env'"
 
-      # Shipped every time: the tags are reused across builds, so "already
-      # present" says nothing about whether they are current.
-      # Save → scp → load (not a live SSH pipe): a dropped connection on
-      # `docker save | gzip | ssh …` leaves a Broken pipe and no useful
-      # resume; a file transfer is retryable and survives keepalives better.
+      # Reuse unchanged image layers over SSH. First transfer seeds the cache;
+      # later deploys send changed content only. Falls back to gzip/scp if
+      # rsync is unavailable. The target still never needs registry access.
       - name: Ship images to the server
-        run: |
-          set -euo pipefail
-          DEPLOY_PATH="${{ vars.MINIAPP_DEPLOY_PATH }}"
-          ARCHIVE=miniapp-images.tar.gz
-          docker save "${{ steps.img.outputs.server }}" "${{ steps.img.outputs.web }}" | gzip -1 > "$ARCHIVE"
-          ls -lh "$ARCHIVE"
-          # Enough free space on the server for the archive plus docker load.
-          NEED=$(stat -c%s "$ARCHIVE")
-          ssh target bash -eu -c "
-            avail=\$(df -B1 --output=avail '$DEPLOY_PATH' | tail -1 | tr -d ' ')
-            need=$((NEED * 3))
-            if [ \"\$avail\" -lt \"\$need\" ]; then
-              echo \"server needs ~\$need bytes free under $DEPLOY_PATH (have \$avail)\" >&2
-              df -h '$DEPLOY_PATH' >&2 || true
-              exit 1
-            fi
-            mkdir -p '$DEPLOY_PATH'
-          "
-          scp -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "$ARCHIVE" "target:$DEPLOY_PATH/$ARCHIVE"
-          ssh target bash -eu <<REMOTE
-            cd "$DEPLOY_PATH"
-            gunzip -c "$ARCHIVE" | docker load
-            rm -f "$ARCHIVE"
-          REMOTE
-          rm -f "$ARCHIVE"
+        env:
+          DEPLOY_PATH: ${{ vars.MINIAPP_DEPLOY_PATH }}
+          SERVER_IMAGE: ${{ steps.img.outputs.server }}
+          WEB_IMAGE: ${{ steps.img.outputs.web }}
+        run: bash deploy/ship-images.sh
 
       - name: Start the mini app
         run: |

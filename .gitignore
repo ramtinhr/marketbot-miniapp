@@ -5,3 +5,5 @@ dist/
 .kaino-try.json
 *.log
 *.tsbuildinfo
+
+__pycache__/
