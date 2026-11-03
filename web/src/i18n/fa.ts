@@ -48,6 +48,7 @@ export const fa = {
     'home.greeting': 'سلام {name}',
     'home.greetingNoName': 'سلام',
     'home.welcome': 'به مارکت‌بات خوش آمدید',
+    'home.bankAccountsBody': 'افزودن و مدیریت حساب‌های بانکی برای برداشت',
     'home.account': 'حساب کاربری',
     'home.phone': 'شمارهٔ موبایل',
     'home.username': 'نام کاربری',

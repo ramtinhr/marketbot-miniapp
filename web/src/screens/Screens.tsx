@@ -4,6 +4,7 @@ import { api, type User } from '../api';
 import {
     AlertIcon,
     AtSignIcon,
+    BankIcon,
     CalendarIcon,
     CandlesIcon,
     ChevronEndIcon,
@@ -230,6 +231,7 @@ export function Home({ user }: { user: User }) {
             <section>
                 <h2 className="section-title">{t('home.account')}</h2>
                 <ul className="section">
+                    <NavRow icon={BankIcon} tone="accent" title={t('banks.title')} body={t('home.bankAccountsBody')} onClick={() => nav.push({ name: 'bankAccounts' })} />
                     <InfoRow icon={PhoneIcon} label={t('home.phone')}>
                         <bdi className="ltr">{formatPhone(user.phone)}</bdi>
                     </InfoRow>
