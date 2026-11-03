@@ -3,7 +3,7 @@
 // and worked on in a browser without Telegram, Kafka or the engine.
 
 import type {
-    AuctionBook, AuctionOffer, Balance, Depth, DepthLevel, MarketTrade, Order, Payment,
+    AuctionBook, AuctionOffer, BankAccount, Balance, Depth, DepthLevel, MarketTrade, Order, Payment,
     RialMethod, RialOffer, RialOrder, RialSide, Withdrawal,
 } from './api';
 import { useTransport, type Transport } from './live';
@@ -15,6 +15,12 @@ const MIDS: Record<string, number> = {
 const SYMBOLS = Object.keys(MIDS);
 const STEP: Record<string, number> = { USDT_IRT: 10, USDC_IRT: 10, BTC_IRT: 50_000, ETH_IRT: 10_000, SOL_IRT: 1000, BNB_IRT: 5000, SHIB_IRT: 0.01 };
 
+// Synthetic accounts for inspecting distinct bank branding in development.
+let bankAccounts: BankAccount[] = [
+    { id: '00000000-0000-4000-8000-000000000099', label: 'حساب اصلی', holder_name: 'رامتین احمدی', iban: 'IR820540102680020817909002', created_at: new Date().toISOString() },
+    { id: '00000000-0000-4000-8000-000000000098', label: 'حساب کاری', holder_name: 'رامتین احمدی', iban: 'IR430120000000000000000001', created_at: new Date().toISOString() },
+    { id: '00000000-0000-4000-8000-000000000097', label: 'پس‌انداز', holder_name: 'رامتین احمدی', iban: 'IR230560000000000000000001', created_at: new Date().toISOString() },
+];
 let seq = 0;
 const id = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
 const now = () => new Date().toISOString();
@@ -154,6 +160,13 @@ async function route(method: string, path: string, body: Record<string, unknown>
     await wait(250);
     const [p, qs] = path.split('?');
     const q = new URLSearchParams(qs);
+    if (p === '/bank-accounts' && method === 'GET') return json({ accounts: bankAccounts });
+    if (p === '/bank-accounts' && method === 'POST') {
+        if (bankAccounts.some(a => a.iban === body.iban)) return json({ code: 'bank_account_exists' }, 409);
+        const account: BankAccount = { id: id(), label: String(body.label), holder_name: String(body.holder_name), iban: String(body.iban), created_at: now() };
+        bankAccounts.unshift(account); return json({ account }, 201);
+    }
+    if (p.startsWith('/bank-accounts/') && method === 'DELETE') { bankAccounts = bankAccounts.filter(a => a.id !== p.split('/').pop()); return new Response(null, { status: 204 }); }
     if (p === '/me') return json({ verified: true });
     if (p === '/auth/otp/send' || p === '/wallet/withdrawals/otp') return json({ expires_in: 120, resend_in: 60 });
     if (p === '/auth/otp/verify') {

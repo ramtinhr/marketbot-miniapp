@@ -44,7 +44,7 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
  *           bot?: import('./bot.js').Bot, botUsername?: string, paymentWebhookSecret?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, trading, auction, rial, hub, photos, bot, botUsername = '', paymentWebhookSecret = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, bankAccounts, trading, auction, rial, hub, photos, bot, botUsername = '', paymentWebhookSecret = '', logger = true }) {
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
@@ -293,6 +293,15 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
         }
       }
 
+      if (bankAccounts) {
+        api.get('/bank-accounts', { preHandler: requireVerified }, async (req) => ({ accounts: await bankAccounts.list(req.session.exchangeUserId) }));
+        api.post('/bank-accounts', { preHandler: requireVerified }, async (req, reply) => reply.code(201).send({ account: await bankAccounts.add(req.session.exchangeUserId, req.body) }));
+        api.delete('/bank-accounts/:id', { preHandler: requireVerified }, async (req, reply) => {
+          await bankAccounts.remove(req.session.exchangeUserId, req.params.id);
+          return reply.code(204).send();
+        });
+      }
+
       if (withdrawals && otp) {
         api.get('/wallet/withdrawals', { preHandler: requireVerified }, async (req) => ({
           networks: NETWORKS,
@@ -303,7 +312,13 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, tra
 
         api.post('/wallet/withdrawals', { preHandler: requireVerified }, async (req) => {
           // Checked before the code, so a typo in the address does not use it up.
-          const w = withdrawals.normalize(req.body);
+          let body = req.body;
+          if (String(body?.asset).toUpperCase() === 'IRT' && body?.recipient_type === 'saved') {
+            if (!bankAccounts) throw httpError(503, 'not_configured', 'bank accounts unavailable');
+            const account = await bankAccounts.get(req.session.exchangeUserId, body.bank_account_id);
+            body = { ...body, destination: account.iban, beneficiary_name: account.holder_name };
+          }
+          const w = withdrawals.normalize(body);
           const otpId = await otp.check(req.user, 'withdraw', req.body?.code);
           // The code is spent only if the amount is frozen, so a short balance can be fixed and retried.
           const withdrawal = await withdrawals.request(req.user, req.session.exchangeUserId, w, (c) => otp.consume(c, otpId));

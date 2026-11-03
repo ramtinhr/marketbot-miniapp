@@ -1176,3 +1176,68 @@ button.balance-card { cursor: pointer; }
         transition-duration: .01ms !important;
     }
 }
+
+/* Bank account cards. Bank identity comes from the Sheba, with locally bundled logos. */
+.bank-card-list { display: grid; gap: 18px; padding: 0; margin: 0; list-style: none; }
+.bank-card {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 22px;
+    min-width: 0;
+    min-height: 204px;
+    overflow: hidden;
+    padding: 24px;
+    border: 1px solid rgb(255 255 255 / .17);
+    border-radius: 24px;
+    background: radial-gradient(ellipse at 0% 0%, color-mix(in srgb, var(--bank-tone) 85%, white) 0%, transparent 64%),
+        linear-gradient(125deg, var(--bank-tone), var(--bank-base) 75%);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--bank-base) 20%, transparent), inset 0 1px 0 rgb(255 255 255 / .12);
+    color: #fff;
+    text-align: right;
+    font-weight: 400;
+}
+.bank-card-pattern {
+    position: absolute; z-index: -1; inset: 0; overflow: hidden; pointer-events: none;
+    background: repeating-linear-gradient(125deg, transparent 0 16px, rgb(255 255 255 / .025) 16px 17px);
+}
+.bank-card-pattern::before, .bank-card-pattern::after {
+    content: ''; position: absolute; width: 320px; height: 320px; border-radius: 50%;
+    border: 1px solid rgb(255 255 255 / .13); inset-inline-start: -155px; top: -160px;
+    box-shadow: 0 0 0 22px rgb(255 255 255 / .035), 0 0 0 45px rgb(255 255 255 / .035), 0 0 0 68px rgb(255 255 255 / .025);
+}
+.bank-card-pattern::after { width: 180px; height: 180px; top: auto; bottom: -150px; inset-inline-start: auto; inset-inline-end: -40px; }
+.bank-card-top { display: flex; align-items: center; gap: 12px; }
+.bank-card-logo { display: grid; place-items: center; flex: 0 0 52px; width: 52px; height: 52px; padding: 8px; background: #fff; border-radius: 16px; box-shadow: 0 3px 12px rgb(0 0 0 / .1); }
+.bank-card-logo img, .bank-card-logo svg { width: 100%; height: 100%; object-fit: contain; }
+.bank-card-logo svg { color: var(--bank-base); }
+.bank-card-heading { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bank-card-heading strong { font-size: 1.04rem; font-weight: 750; line-height: 1.45; }
+.bank-card-heading > span { color: rgb(255 255 255 / .72); font-size: .75rem; overflow-wrap: anywhere; }
+.bank-card-number { display: flex; flex-direction: column; gap: 5px; }
+.bank-card-number > span { color: var(--bank-accent); font-size: .65rem; font-weight: 650; }
+.bank-card-number bdi { display: block; text-align: left; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: clamp(.72rem, 3.1vw, 1.05rem); letter-spacing: .025em; font-weight: 500; line-height: 1.6; }
+.bank-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .78rem; }
+.bank-card-bottom > span:first-child { overflow-wrap: anywhere; }
+.bank-card-mark { flex-shrink: 0; color: var(--bank-accent); font: 600 .58rem/1 ui-monospace, monospace; letter-spacing: .12em; direction: ltr; }
+.bank-card-check { margin-inline-start: auto; display: grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; background: rgb(255 255 255 / .18); border: 1px solid rgb(255 255 255 / .4); border-radius: 50%; }
+.bank-card-check svg { width: 16px; height: 16px; }
+.bank-card-selected { outline: 2px solid var(--bank-accent); outline-offset: -3px; }
+.bank-card-actions { display: flex; justify-content: flex-end; padding: 9px 8px 0; }
+.bank-card-actions button { min-height: 32px; }
+.bank-card-compact { padding: 18px; min-height: 172px; gap: 14px; border-radius: 18px; }
+.bank-card-compact .bank-card-logo { width: 42px; height: 42px; flex-basis: 42px; border-radius: 12px; }
+.bank-card-compact .bank-card-heading strong { font-size: .92rem; }
+.bank-card-compact .bank-card-number bdi { font-size: clamp(.7rem, 3vw, .94rem); }
+.as-group { max-height: calc(100dvh - 110px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.as-option-card { padding: 8px 12px; border-top: 0; }
+.as-custom { width: 100%; min-width: 0; }
+.as-option-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+@media (max-width: 360px) {
+    .bank-card { padding: 18px; gap: 18px; }
+    .bank-card-heading strong { font-size: .92rem; }
+    .bank-card-logo { width: 44px; height: 44px; flex-basis: 44px; }
+    .bank-card-compact { padding: 14px; gap: 14px; }
+}

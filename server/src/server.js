@@ -1,3 +1,4 @@
+import { BankAccounts } from './bank-accounts.js';
 import { buildApp } from './app.js';
 import { Auction } from './auction.js';
 import { Bot } from './bot.js';
@@ -106,6 +107,7 @@ const app = await buildApp({
   payments,
   paymentWebhookSecret: config.payments.webhookSecret,
   withdrawals,
+  bankAccounts: new BankAccounts(pg),
   trading,
   auction,
   rial,

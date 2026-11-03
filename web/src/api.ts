@@ -38,7 +38,8 @@ export interface Payment { id: string; provider: string; amount_toman: string; s
 export interface ChargeInfo { min_toman: number; max_toman: number; provider: string; payments: Payment[] }
 
 export type WithdrawalStatus = 'pending' | 'processing' | 'paid' | 'rejected' | 'cancelled';
-export interface Withdrawal { id: string; asset: string; amount: string; network: string | null; destination: string; status: WithdrawalStatus; note: string | null; created_at: string }
+export interface BankAccount { id: string; label: string; holder_name: string; iban: string; created_at: string }
+export interface Withdrawal { bank_account_id?: string | null; recipient_type?: 'saved' | 'other' | null; beneficiary_name?: string | null; id: string; asset: string; amount: string; network: string | null; destination: string; status: WithdrawalStatus; note: string | null; created_at: string }
 
 export type Side = 'buy' | 'sell';
 export interface DepthLevel { price: string; quantity: string; user_quantity?: string }
@@ -184,9 +185,12 @@ export const api = {
     chargeInfo: () => request<ChargeInfo>('/wallet/charge'),
     charge: (amount: number) => post<{ payment_id: string; url: string }>('/wallet/charge', { amount }),
 
+    bankAccounts: () => request<{ accounts: BankAccount[] }>('/bank-accounts'),
+    addBankAccount: (body: { label: string; holder_name: string; iban: string }) => post<{ account: BankAccount }>('/bank-accounts', body),
+    deleteBankAccount: (id: string) => request<void>(`/bank-accounts/${id}`, { method: 'DELETE' }),
     withdrawals: () => request<{ networks: Record<string, string[]>; withdrawals: Withdrawal[] }>('/wallet/withdrawals'),
     sendWithdrawCode: () => post<OtpSent>('/wallet/withdrawals/otp'),
-    withdraw: (body: { asset: string; amount: string; network: string | null; destination: string; code: string }) =>
+    withdraw: (body: { asset: string; amount: string; network: string | null; destination: string; code: string; recipient_type?: 'saved' | 'other'; bank_account_id?: string; beneficiary_name?: string }) =>
         post<{ withdrawal: Withdrawal }>('/wallet/withdrawals', body),
     cancelWithdrawal: (id: string) => post<{ withdrawal: Withdrawal }>(`/wallet/withdrawals/${id}/cancel`),
 

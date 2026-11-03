@@ -1,3 +1,4 @@
+import { BankAccountsPage } from './BankAccounts';
 import type { User } from '../api';
 import { ActionSheet } from '../components/ActionSheet';
 import { CandlesIcon, HomeIcon, WalletIcon } from '../components/icons';
@@ -56,6 +57,7 @@ function TradeTypeSheet() {
 function PageView({ page }: { page: Page }) {
     switch (page.name) {
         case 'asset': return <AssetPage asset={page.asset} />;
+        case 'bankAccounts': return <BankAccountsPage />;
         case 'charge': return <ChargePage />;
         case 'deposit': return <DepositPage />;
         case 'withdraw': return <WithdrawPage initialAsset={page.asset} />;

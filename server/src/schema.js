@@ -204,7 +204,11 @@ BEGIN
 END $$;
 `;
 
-export const SCHEMA = CORE_SCHEMA + AUCTION_SCHEMA + RIAL_SCHEMA;
+export const SCHEMA = CORE_SCHEMA + AUCTION_SCHEMA + RIAL_SCHEMA + `
+ALTER TABLE miniapp_withdrawals ADD COLUMN IF NOT EXISTS bank_account_id UUID;
+ALTER TABLE miniapp_withdrawals ADD COLUMN IF NOT EXISTS recipient_type TEXT CHECK (recipient_type IN ('saved', 'other'));
+ALTER TABLE miniapp_withdrawals ADD COLUMN IF NOT EXISTS beneficiary_name TEXT;
+`;
 
 /** Applies SCHEMA once per pool; a failure is retried on the next call. */
 export function schemaReady(pg) {

@@ -34,6 +34,7 @@ function launchScreen(): Launch {
         case 'auction': return { tab: 'trade', orderType: 'auction' };
         case 'myoffers': return { tab: 'trade', orderType: 'auction', stack: [{ name: 'auctionOrders' }] };
         case 'trade': return { tab: 'trade' };
+        case 'banks': return { tab: 'wallet', stack: [{ name: 'bankAccounts' }] };
         case 'wallet': return { tab: 'wallet' };
         case 'charge': return { tab: 'wallet', stack: [{ name: 'charge' }] };
         case 'rial': return { tab: 'wallet', stack: [{ name: 'rial' }] };
@@ -68,6 +69,7 @@ function previewState(): State | null {
         case 'error': return { kind: 'error', code: 'network' };
         case 'otp': return { kind: 'otp', user };
         case 'home': return { kind: 'app', user };
+        case 'banks': return { kind: 'app', user, tab: 'wallet', stack: [{ name: 'bankAccounts' }] };
         case 'wallet': return { kind: 'app', user, tab: 'wallet' };
         case 'trade': return { kind: 'app', user, tab: 'trade' };
         case 'auction': return { kind: 'app', user, tab: 'trade', orderType: 'auction' };

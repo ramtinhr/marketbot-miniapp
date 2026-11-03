@@ -38,7 +38,7 @@ export function normalizeSheba(raw) {
   return BigInt(digits) % 97n === 1n ? iban : null;
 }
 
-const COLUMNS = 'id, asset, amount, network, destination, status, note, created_at, updated_at';
+const COLUMNS = 'id, asset, amount, network, destination, status, note, bank_account_id, recipient_type, beneficiary_name, created_at, updated_at';
 
 export class Withdrawals {
   /**
@@ -59,7 +59,14 @@ export class Withdrawals {
       if (!/^\d+$/.test(amount)) throw httpError(400, 'invalid_amount', 'Toman amounts are whole numbers');
       const sheba = normalizeSheba(body?.destination);
       if (!sheba) throw httpError(400, 'invalid_sheba', 'not a valid Sheba number (IR and 24 digits)');
-      return { asset, amount, network: null, destination: sheba };
+      const result = { asset, amount, network: null, destination: sheba };
+      if (body.recipient_type !== undefined) {
+        if (!['saved', 'other'].includes(body.recipient_type)) throw httpError(400, 'invalid_recipient', 'unknown recipient type');
+        const name = typeof body.beneficiary_name === 'string' ? body.beneficiary_name.trim() : '';
+        if (!name || name.length > 120) throw httpError(400, 'invalid_beneficiary', 'beneficiary name is required');
+        Object.assign(result, { recipient_type: body.recipient_type, beneficiary_name: name, bank_account_id: body.recipient_type === 'saved' ? body.bank_account_id : null });
+      }
+      return result;
     }
     const networks = NETWORKS[asset];
     if (!networks) throw httpError(400, 'unsupported_asset', `${asset} cannot be withdrawn`);
@@ -76,9 +83,9 @@ export class Withdrawals {
     return withTransaction(this.pg, async (c) => {
       await confirm(c);
       const { rows } = await c.query(
-        `INSERT INTO miniapp_withdrawals (user_id, exchange_user_id, asset, amount, network, destination)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
-        [user.id, exchangeUserId, w.asset, w.amount, w.network, w.destination],
+        `INSERT INTO miniapp_withdrawals (user_id, exchange_user_id, asset, amount, network, destination, bank_account_id, recipient_type, beneficiary_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${COLUMNS}`,
+        [user.id, exchangeUserId, w.asset, w.amount, w.network, w.destination, w.bank_account_id ?? null, w.recipient_type ?? null, w.beneficiary_name ?? null],
       );
       const row = rows[0];
       await this.wallets.move(c, 'freeze', exchangeUserId, w.asset, w.amount, {

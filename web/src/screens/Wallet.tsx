@@ -86,6 +86,11 @@ export function WalletPage() {
                 </div>
             </section>
 
+            <ul className="section">
+                <li><button type="button" className="row tappable" onClick={() => nav.push({ name: 'bankAccounts' })}>
+                    <CreditCardIcon /><span className="row-text"><span className="row-title">{t('banks.title')}</span></span>
+                </button></li>
+            </ul>
             <Alert code={error} />
 
             <section>

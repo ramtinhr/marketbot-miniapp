@@ -16,6 +16,7 @@ export type OrderType = 'limit' | 'market' | 'auction';
 
 export type Page =
     | { name: 'asset'; asset: string }
+    | { name: 'bankAccounts' }
     | { name: 'charge' }
     | { name: 'deposit' }
     | { name: 'withdraw'; asset?: string }

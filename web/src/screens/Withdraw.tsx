@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, ApiError, type Withdrawal } from '../api';
+import { bankFromIban } from '../banks';
+import { api, ApiError, type BankAccount, type Withdrawal } from '../api';
+import { BankCard } from '../components/BankCard';
+import { ActionSheet } from '../components/ActionSheet';
 import { BankIcon } from '../components/icons';
 import { MainAction } from '../components/MainAction';
 import { Alert, AmountInput, Badge, CoinIcon, Empty, PageHeader, Segmented, toast } from '../components/ui';
 import { asciiNumber, assetDigits, assetName, fmtAsset, fmtDateTime, parseAmount, toAmount } from '../format';
 import { errorMessage, t, type MessageKey } from '../i18n';
-import { useBackHandler } from '../nav';
+import { useBackHandler, useNav } from '../nav';
 import { confirm, haptic, selection } from '../telegram';
 import { useUser } from '../user';
 import { balanceOf, refreshWallet, useWallet } from '../wallet';
@@ -26,7 +29,7 @@ function WithdrawalRow({ w, onCancel }: { w: Withdrawal; onCancel: (w: Withdrawa
             <CoinIcon asset={w.asset} size={32} />
             <span className="row-text">
                 <span className="row-title">{fmtAsset(w.amount, w.asset, { trim: w.asset !== 'IRT' })} {w.asset === 'IRT' ? t('common.toman') : w.asset}</span>
-                <span className="row-subtitle"><bdi className="ltr">{short}</bdi> · {fmtDateTime(w.created_at)}</span>
+                <span className="row-subtitle">{w.beneficiary_name && <>{w.beneficiary_name} · </>}<bdi className="ltr">{short}</bdi> · {fmtDateTime(w.created_at)}</span>
             </span>
             <span className="row-end">
                 <span className={`status ${w.status}`}>{t(`withdrawal.${w.status}` as MessageKey)}</span>
@@ -37,7 +40,13 @@ function WithdrawalRow({ w, onCancel }: { w: Withdrawal; onCancel: (w: Withdrawa
 }
 
 export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
+    const nav = useNav();
     const user = useUser();
+    const [accounts, setAccounts] = useState<BankAccount[] | null>(null);
+    const [recipient, setRecipient] = useState<'saved' | 'other' | null>(null);
+    const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null);
+    const [beneficiary, setBeneficiary] = useState('');
+    const [sheet, setSheet] = useState<'kind' | 'saved' | null>((initialAsset ?? 'IRT') === 'IRT' ? 'kind' : null);
     const { info } = useWallet();
     const [networks, setNetworks] = useState<Record<string, string[]>>({});
     const [list, setList] = useState<Withdrawal[] | null>(null);
@@ -57,11 +66,20 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
         void load();
     }, [load]);
 
+    useEffect(() => {
+        if (asset !== 'IRT') return;
+        let active = true;
+        api.bankAccounts().then(r => { if (active) setAccounts(r.accounts); }).catch(err => { if (active) setError(err instanceof ApiError ? err.code : 'unknown'); });
+        return () => { active = false; };
+    }, [asset]);
+
     const assets = ['IRT', ...Object.keys(networks)].filter((a) => a === 'IRT' || info?.assets.includes(a));
     const assetNetworks = asset === 'IRT' ? [] : networks[asset] ?? [];
     useEffect(() => {
         setNetwork(assetNetworks.length === 1 ? assetNetworks[0] : null);
         setDestination('');
+        setRecipient(null); setSelectedAccount(null); setBeneficiary('');
+        setSheet(asset === 'IRT' ? 'kind' : null);
         setAmount('');
         setError(null);
     }, [asset, assetNetworks.join()]);
@@ -72,16 +90,19 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
     const value = parseAmount(amount, isToman ? 0 : decimals);
     const tooMuch = value !== null && Number(value) > available + 1e-12;
     const sheba = asciiNumber(destination).replace(/^IR/i, '');
-    const destOk = isToman ? validSheba(sheba) : /^[A-Za-z0-9:_-]{20,128}$/.test(destination.trim());
+    const destOk = isToman ? Boolean(recipient && validSheba(sheba) && (recipient !== 'saved' || selectedAccount)) : /^[A-Za-z0-9:_-]{20,128}$/.test(destination.trim());
     const body = {
         asset,
         amount: value ?? '',
         network: isToman ? null : network,
         destination: isToman ? `IR${sheba}` : destination.trim(),
+        ...(isToman && recipient ? { recipient_type: recipient, beneficiary_name: beneficiary.trim(), ...(recipient === 'saved' && selectedAccount ? { bank_account_id: selectedAccount.id } : {}) } : {}),
     };
 
     const next = () => {
         const problem = !isToman && !network ? 'invalid_network'
+            : isToman && !recipient ? 'invalid_recipient'
+            : isToman && (!beneficiary.trim() || beneficiary.trim().length > 120) ? 'invalid_beneficiary'
             : !destOk ? (isToman ? 'invalid_sheba' : 'invalid_address')
                 : !value ? 'invalid_amount'
                     : tooMuch ? 'insufficient_balance' : null;
@@ -109,7 +130,7 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
         toast(t('withdraw.done'));
         setStep('form');
         setAmount('');
-        setDestination('');
+        setDestination(''); setRecipient(null); setSelectedAccount(null); setBeneficiary('');
         void refreshWallet();
         void load();
     };
@@ -135,6 +156,7 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
                 <ul className="section">
                     <li className="row compact"><span className="row-title">{t('withdraw.amount')}</span><span className="row-value strong">{fmtAsset(body.amount, asset, { trim: !isToman })} {isToman ? t('common.toman') : asset}</span></li>
                     <li className="row compact"><span className="row-title">{isToman ? t('withdraw.sheba') : t('withdraw.address')}</span><span className="row-value"><bdi className="ltr">{body.destination}</bdi></span></li>
+                    {isToman && <li className="row compact"><span className="row-title">{t('banks.holder')}</span><span className="row-value">{beneficiary}</span></li>}
                     {body.network && <li className="row compact"><span className="row-title">{t('withdraw.network')}</span><span className="row-value ltr-inline">{body.network}</span></li>}
                 </ul>
                 <OtpForm phone={user.phone} send={api.sendWithdrawCode} verify={submit} submitText={t('withdraw.submit')} />
@@ -164,7 +186,41 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
                 </div>
             )}
 
-            {isToman ? (
+            {isToman && <>
+                <ul className="section"><li><button type="button" className="row tappable" onClick={() => setSheet('kind')}>
+                    <BankIcon /><span className="row-text"><span className="row-title">{t('withdraw.recipient')}</span>
+                    <span className="row-subtitle">{recipient === 'saved' ? selectedAccount?.label ?? t('withdraw.savedAccount') : recipient === 'other' ? t('withdraw.otherAccount') : t('withdraw.chooseRecipient')}</span></span>
+                    <span className="link-button small">{t('withdraw.changeRecipient')}</span>
+                </button></li></ul>
+                {recipient === 'saved' && <>
+                    <button type="button" className="button secondary" onClick={() => setSheet('saved')}>{selectedAccount?.label ?? t('withdraw.savedAccount')}</button>
+                    {selectedAccount && <BankCard account={selectedAccount} selected />}
+                </>}
+                {recipient === 'other' && <div className="field"><div className="field-head"><label htmlFor="beneficiary">{t('banks.holder')}</label></div>
+                    <div className="field-box"><input id="beneficiary" value={beneficiary} maxLength={120} onChange={e => { setBeneficiary(e.target.value); setError(null); }} /></div>
+                </div>}
+                {sheet && <ActionSheet key={sheet} title={t(sheet === 'kind' ? 'withdraw.chooseRecipient' : 'withdraw.savedAccount')}
+                    value={sheet === 'saved' ? selectedAccount?.id : recipient ?? undefined}
+                    message={sheet === 'saved' && accounts !== null && !accounts.length ? t('banks.none') : undefined}
+                    options={sheet === 'kind' ? [
+                        { value: 'saved', label: t('withdraw.savedAccount'), description: t('withdraw.savedAccountHint') },
+                        { value: 'other', label: t('withdraw.otherAccount'), description: t('withdraw.otherAccountHint') },
+                    ] : [...(accounts ?? []).map(a => ({ value: a.id, label: `${bankFromIban(a.iban).name} · ${a.label} · ${a.holder_name} · ${a.iban}`, content: <BankCard account={a} compact selected={selectedAccount?.id === a.id} /> })), { value: 'add', label: t('banks.add') }]}
+                    onClose={() => setSheet(current => current === sheet ? null : current)}
+                    onSelect={choice => {
+                        setError(null);
+                        if (sheet === 'kind') {
+                            setRecipient(choice as 'saved' | 'other'); setSelectedAccount(null); setDestination(''); setBeneficiary('');
+                            setSheet(choice === 'saved' ? 'saved' : null);
+                        } else if (choice === 'add') { nav.push({ name: 'bankAccounts' }); }
+                        else {
+                            const account = accounts?.find(a => a.id === choice);
+                            if (account) { setSelectedAccount(account); setDestination(account.iban); setBeneficiary(account.holder_name); setRecipient('saved'); }
+                        }
+                    }} />}
+            </>}
+
+            {isToman ? recipient === 'other' ? (
                 <div className={`field ${error === 'invalid_sheba' ? 'invalid' : ''}`}>
                     <div className="field-head"><label htmlFor="sheba">{t('withdraw.sheba')}</label></div>
                     <div className="field-box ltr-box">
@@ -176,7 +232,7 @@ export function WithdrawPage({ initialAsset }: { initialAsset?: string }) {
                     </div>
                     <div className="field-hint">{t('withdraw.shebaHint')}</div>
                 </div>
-            ) : (
+            ) : null : (
                 <div className={`field ${error === 'invalid_address' ? 'invalid' : ''}`}>
                     <div className="field-head"><label htmlFor="address">{t('withdraw.address')}</label></div>
                     <div className="field-box">

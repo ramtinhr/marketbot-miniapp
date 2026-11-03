@@ -281,3 +281,47 @@ Run *Deploy* again with the previous commit's full sha as the image tag; every `
 | `docker-compose.prod.yml` | production: the CI-built images, loopback only |
 | `.github/workflows/` | CI and the manual deploy; `.github/actions/telegram-notify` |
 # marketbot-miniapp
+
+### Saved bank accounts and Toman withdrawal destinations
+
+Wallet → **حساب‌های بانکی** saves an account label, holder name and Iranian
+Sheba/IBAN. Accounts can be removed; removal archives the saved record and
+preserves existing withdrawal history. These are user-entered destinations,
+not bank-verified proof of account ownership.
+
+The verified Mini App session can use `GET /api/v1/bank-accounts`,
+`POST /api/v1/bank-accounts {label, holder_name, iban}`, and
+`DELETE /api/v1/bank-accounts/:id`. The core `marketbot-api` exposes the same
+operations for its existing admin sessions under
+`/api/v1/users/:id/bank-accounts` (DELETE adds `/:accountId`). Both services
+use `public.marketbot_bank_accounts`, scoped by the shared exchange user ID.
+The service implementations are mirrored in `server/src/bank-accounts.js`
+and `marketbot-api/src/lib/bankAccounts.js` because their Docker images ship
+independently; keep their schema and validation contract in sync. Either
+service creates the table on first use. No service credentials or admin
+sessions are passed to the Mini App client.
+
+Toman withdrawal opens a bottom sheet offering **حساب‌های من** or
+**حساب شخص دیگر**. Saved-account requests send `recipient_type: "saved"`
+and `bank_account_id`; the server resolves the current user's saved account
+and ignores client-supplied holder/destination values. Other-account requests
+send `recipient_type: "other"`, `destination` (Sheba) and `beneficiary_name`.
+Both routes retain SMS confirmation, balance freezing and pending request
+cancellation. Destination and holder details are snapshotted on the withdrawal.
+All verified users may use either option; no role-permission system was added.
+This change records withdrawal requests; automatic bank payouts remain separate.
+
+### Bank card appearance
+
+Saved accounts, the add-account preview and withdrawal account picker share
+`web/src/components/BankCard.tsx`. The bank is identified locally from a
+checksum-valid Sheba using `web/src/banks.ts`; unknown or incomplete numbers
+use a neutral account card. The cards show the bank logo/name, account label,
+holder and full Sheba, without inventing a debit card number.
+
+Bank mappings and SVGs are bundled from MIT-licensed `ir-banks-info`; source,
+revision and license are retained in `web/public/banks/NOTICE.md` and
+`LICENSE.txt`. No external lookup receives the user's IBAN. The visual layouts
+use bank-inspired palettes rather than replicas of specific physical cards.
+Use `http://localhost:5174/?preview=banks` with the Vite development server to
+see synthetic Parsian, Mellat and Saman accounts outside Telegram.

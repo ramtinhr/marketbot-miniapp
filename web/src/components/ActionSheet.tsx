@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { t } from '../i18n';
@@ -10,6 +10,7 @@ export interface ActionSheetOption<T extends string> {
     value: T;
     label: string;
     description?: string;
+    content?: ReactNode;
 }
 
 // How long the sheet takes to slide away; matches .as-closing in styles.css.
@@ -65,12 +66,16 @@ export function ActionSheet<T extends string>({ title, message, options, value, 
                         <button
                             key={o.value}
                             type="button"
-                            className={`as-option ${o.value === value ? 'current' : ''}`}
+                            className={`as-option ${o.content ? 'as-option-card' : ''} ${o.value === value ? 'current' : ''}`}
+                            aria-label={o.content ? o.label : undefined}
+                            aria-pressed={o.content ? o.value === value : undefined}
                             onClick={() => { selection(); close(() => onSelect(o.value)); }}
                         >
-                            <span className="as-label">{o.label}</span>
-                            {o.description && <span className="as-desc">{o.description}</span>}
-                            {o.value === value && <CheckIcon className="as-check" />}
+                            {o.content ? <div className="as-custom">{o.content}</div> : <>
+                                <span className="as-label">{o.label}</span>
+                                {o.description && <span className="as-desc">{o.description}</span>}
+                                {o.value === value && <CheckIcon className="as-check" />}
+                            </>}
                         </button>
                     ))}
                 </div>
