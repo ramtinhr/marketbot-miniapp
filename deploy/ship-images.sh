@@ -2,14 +2,13 @@
 # Images are pulled on the runner because production cannot reach the registry.
 set -euo pipefail
 : "${DEPLOY_PATH:?set DEPLOY_PATH}"
-: "${SERVER_IMAGE:?set SERVER_IMAGE}"
-: "${WEB_IMAGE:?set WEB_IMAGE}"
+: "${IMAGE:?set IMAGE}"
 # ssh joins remote arguments into shell text. Keep all forwarded values simple.
 if [[ ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ || "$DEPLOY_PATH" == / ]]; then
   echo 'DEPLOY_PATH must be an absolute path without spaces or shell characters' >&2
   exit 1
 fi
-for ref in "$SERVER_IMAGE" "$WEB_IMAGE"; do
+for ref in "$IMAGE"; do
   if [[ ! "$ref" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]+$ ]]; then
     echo 'invalid image reference' >&2
     exit 1
@@ -20,7 +19,7 @@ work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 mkdir "$work/layers"
 echo 'Saving images and preparing layers…'
-docker save "$SERVER_IMAGE" "$WEB_IMAGE" > "$work/images.tar"
+docker save "$IMAGE" > "$work/images.tar"
 tar -xf "$work/images.tar" -C "$work/layers"
 bytes=$(du -sb "$work/layers" | cut -f1)
 
@@ -50,7 +49,7 @@ if [[ "$mode" == rsync ]] && command -v rsync >/dev/null 2>&1; then
   echo 'Syncing changed image layers (unchanged content is reused)…'
   # Compare content, not Docker archive timestamps. Delay cache deletions until
   # transfer completes; partial files survive a dropped connection for retry.
-  rsync -rzc --compress-level=6 --delete-delay \
+  rsync -rzc --compress-level=1 --delete-delay \
     --partial --partial-dir=.rsync-partial --info=progress2 --stats --human-readable \
     -e 'ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10' \
     "$work/layers/" "target:$DEPLOY_PATH/.image-cache/"
@@ -60,13 +59,13 @@ if [[ "$mode" == rsync ]] && command -v rsync >/dev/null 2>&1; then
 REMOTE
 else
   echo 'rsync unavailable; transferring a full gzip archive (install rsync on both hosts to reuse layers).'
-  gzip -6 < "$work/images.tar" > "$work/miniapp-images.tar.gz"
-  ls -lh "$work/miniapp-images.tar.gz"
+  gzip -1 < "$work/images.tar" > "$work/release-images.tar.gz"
+  ls -lh "$work/release-images.tar.gz"
   # A failed upload cannot be mistaken for a complete archive on a later run.
   scp -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-    "$work/miniapp-images.tar.gz" "target:$DEPLOY_PATH/miniapp-images.tar.gz.part"
+    "$work/release-images.tar.gz" "target:$DEPLOY_PATH/release-images.tar.gz.part"
   ssh target bash -seuo pipefail -- "$DEPLOY_PATH" <<'REMOTE'
-    archive="$1/miniapp-images.tar.gz.part"
+    archive="$1/release-images.tar.gz.part"
     gzip -dc "$archive" | docker load
     rm -f "$archive"
 REMOTE

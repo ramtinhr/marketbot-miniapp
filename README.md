@@ -1,5 +1,7 @@
 # marketbot-miniapp
 
+CI/CD setup and runtime secret templates: [deploy/README.md](deploy/README.md).
+
 MarketBot's Telegram Mini App — the users' app, in Persian: a wallet (balances, charge by card, withdrawals) and a trade page (live order book, limit and market orders). It is a product of its own, separate from the admins' dashboard ([marketbot-web](../marketbot-web)) and its API ([marketbot-api](../marketbot-dashboard)): it has its own UI, its own server and its own sessions. It shares the bot's Postgres, where it keeps its own `miniapp_*` tables and uses the exchange engine's `exchange.*` wallets, orders and trades, and talks to the engine ([marketbot-engine](../marketbot-engine)) over its Kafka topics, as the dashboard does.
 
 | Folder | What it is |
@@ -128,36 +130,16 @@ Use a separate bot for development, so its URL can point at your tunnel.
 
 Locally, `docker compose up --build` runs both images on the host network: the server on `PORT` (8090), and nginx serving the app on `WEB_PORT` (8082) with `/api` proxied to the server.
 
-Production works like the other MarketBot services: CI builds the images, a manual workflow ships them to the server over SSH (the server has no route to a registry), and `docker-compose.prod.yml` runs them there. Both containers listen on loopback only; marketbot-api's nginx terminates TLS for the app's domain.
-
-| Workflow | When | What |
-|---|---|---|
-| `.github/workflows/ci.yml` | push and pull request to `main` | server tests, web typecheck and build, compose validation; then builds `ghcr.io/<owner>/<repo>/server` and `/web` (pushed on `main` as `latest`, `main` and the commit sha); a Telegram message |
-| `.github/workflows/deploy.yml` | by hand (*Actions → Deploy → Run workflow*, with an image tag) | writes `.env` from `MINIAPP_ENV`, ships the compose file and both images, `docker compose up -d`, waits for `/health/ready`; a Telegram message |
-
-### Image transfer speed
-
-The deploy runner pulls both images, then `deploy/ship-images.sh` sends their
-saved layers over SSH. When `rsync` is installed on the runner and server,
-`<MINIAPP_DEPLOY_PATH>/.image-cache` retains the last deployment's layers.
-The first deploy populates this cache; later deploys transfer only changed
-content (including changed manifests even when a tag such as `latest` is
-reused). Progress and transfer statistics are printed in the deploy log.
-Interrupted transfers retain partial data for the next attempt; images load
-only after a successful sync. Obsolete cached layers are removed after sync.
-
-If `rsync` is missing, deployment falls back to a full gzip/scp archive.
-Install `rsync` on the server to enable incremental transfers; the server
-still needs no registry access. Removing `.image-cache` resets the optimization
-and makes the next deployment send all layers again. Keep room for this cache
-as well as Docker's image storage. No images are deployed by local tests:
-`python3 -m unittest discover -s deploy -p 'test_*.py' -v` uses isolated fixtures.
+Production CI/CD follows [deploy/README.md](deploy/README.md): manual source
+builds by default, optional CI image transfer, private runtime env, readiness
+checks and automatic application rollback. Both containers bind to loopback;
+marketbot-api's nginx terminates TLS for the app's domain.
 
 ### First deploy
 
 1. **Deploy the bot, the engine and marketbot-api first.** The mini app uses the bot's Postgres and Kafka, and the engine must have started once with `EXCHANGE_ENABLED=true` so the `exchange` schema is current - `/health/ready` reports `exchange_schema` until it is.
 2. **DNS:** point the app's domain (e.g. `app.parscryptoexchange.com`) at the server.
-3. **marketbot-api:** add `MINIAPP_DOMAIN=app.parscryptoexchange.com` (and `MINIAPP_PORT` if `WEB_PORT` below is not 8082) to its `API_ENV` secret and redeploy it. Its nginx then serves the ACME challenge for the domain; issue the certificate once on the server, in the API's deploy directory:
+3. **marketbot-api:** add `MINIAPP_DOMAIN=app.parscryptoexchange.com` (and `MINIAPP_PORT` if `WEB_PORT` below is not 8082) to its `API_ENV` secret and redeploy it. Its nginx then serves the ACME challenge for the domain; issue the certificate once on the server, in the API's `current` release directory:
    ```sh
    docker compose run --rm --entrypoint certbot certbot certonly \
      --webroot -w /var/www/certbot -d app.parscryptoexchange.com
@@ -167,7 +149,7 @@ as well as Docker's image storage. No images are deployed by local tests:
 5. **BotFather:** `/mybots` → the bot → *Bot Settings* → *Configure Mini App* (or *Menu Button*) → `https://app.parscryptoexchange.com`.
 6. **Kaino:** the gateway returns the user to `$PUBLIC_URL/api/v1/payments/callback/<authority>`; if the merchant account restricts callback domains, allow this one.
 
-With `NODE_ENV=production` (set by the prod compose file) the server refuses to start without `BOT_TOKEN`, an https `PUBLIC_URL`, `DB_PASSWORD`, `KAFKA_BROKERS`, `KAVENEGAR_API_KEY` and `KAVENEGAR_OTP_TEMPLATE`, and `KAINO_USERNAME`, `KAINO_PASSWORD`, `KAINO_TENANT` and `KAINO_SECRET`, or with a malformed `KAINO_*` URL, the console SMS or the fake gateway; `docker logs marketbot-miniapp-server` names what is missing.
+When configured with `NODE_ENV=production` the server refuses to start without `BOT_TOKEN`, an https `PUBLIC_URL`, `DB_PASSWORD`, `KAFKA_BROKERS`, `KAVENEGAR_API_KEY` and `KAVENEGAR_OTP_TEMPLATE`, and `KAINO_USERNAME`, `KAINO_PASSWORD`, `KAINO_TENANT` and `KAINO_SECRET`, or with a malformed `KAINO_*` URL, the console SMS or the fake gateway; `docker logs marketbot-miniapp-server` names what is missing.
 
 **How a charge is settled** (`src/payments.js`, `src/kaino.js`): the server opens a Kaino charge for the amount in Rial under a random `authority` (`MB-` and 16 hex digits) and sends the user to Kaino's pay page. When the browser comes back to the callback, only the path's authority is used: the server verifies *the charge it stored* (its identifier, amount and Kaino reference) with Kaino, holding the payment's row lock, and credits the wallet once under the idempotency key `miniapp-payment:<id>`. A decline marks the payment failed or cancelled (the bank refunds unverified payments); a verify answer that names another amount or charge, or an unknown state, leaves it pending with the reason in `error` and the answer in `gateway_response`, and is logged as `payment verification unclear`; if Kaino cannot be reached it stays pending and the result page offers to check again. A payment verified whose credit then failed keeps `verified_at` and is credited on the next callback without asking Kaino again.
 
@@ -237,7 +219,7 @@ webhook secrets belong in deployment secrets, never in the frontend bundle.
 | `MINIAPP_ENV` | secret | yes | the server's whole `.env`, multi-line - see below |
 | `TELEGRAM_BOT_TOKEN` | secret | no | bot that posts CI and deploy messages; unset turns the messages off |
 | `TELEGRAM_CHAT_ID_CICD` | secret | no | numeric chat ID for those messages (`-100...` for a channel) |
-| `MINIAPP_DEPLOY_PATH` | variable | no | directory on the server for the compose file and `.env`, e.g. `/opt/marketbot-miniapp` (the SSH user must be able to write there); default `/opt/marketbot-miniapp` |
+| `MINIAPP_DEPLOY_PATH` | variable | yes | directory on the server for the compose file and `.env`, e.g. `/opt/marketbot-miniapp` (the SSH user must be able to write there) |
 | `SSH_PORT` | variable | no | SSH port; default `22` |
 | `BOT_USERNAME` | variable | no | bot username without `@`, baked into the web build for the "open in Telegram" link |
 
@@ -268,7 +250,7 @@ KAFKA_BROKERS=127.0.0.1:9092
 
 ### Rolling back
 
-Run *Deploy* again with the previous commit's full sha as the image tag; every `main` build is kept under its sha.
+Run *Deploy* with `delivery=image` and `image_tag=sha-<previous full commit SHA>`. Failed activation also automatically restores the previous release.
 
 ## Layout
 

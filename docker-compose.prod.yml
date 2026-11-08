@@ -1,4 +1,4 @@
-# Production compose file. Never builds - it runs the exact images CI built,
+# Production compose file. Runs source-built or CI-built release images,
 # side-loaded by the deploy workflow. Config comes from the .env next to this
 # file on the server, which the deploy workflow writes from GitHub Secrets.
 #
@@ -16,7 +16,7 @@ services:
     # failing usefully.
     pull_policy: never
     container_name: marketbot-miniapp-server
-    env_file: .env
+    env_file: ${DEPLOY_ENV_FILE:-.env}
     environment:
       NODE_ENV: development
       DB_HOST: localhost

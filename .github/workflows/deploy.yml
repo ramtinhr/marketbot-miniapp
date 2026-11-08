@@ -1,181 +1,84 @@
 name: Deploy
-
-# Manual only, like the bot's, the API's and the dashboard's deploys: the mini
-# app moves real users' money.
-#
-# Deploys to the same host as the bot, the exchange engine and marketbot-api,
-# and relies on them: the bot's Postgres and Kafka, the engine's "exchange"
-# schema and topics, and the API's nginx serving MINIAPP_DOMAIN over HTTPS
-# (MINIAPP_DOMAIN and MINIAPP_PORT in its API_ENV). Deploy those first.
 on:
   workflow_dispatch:
     inputs:
+      delivery:
+        description: Delivery method (source builds on server; image transfers CI image)
+        type: choice
+        options: [source, image]
+        default: source
       image_tag:
-        description: "Image tag to deploy (e.g. latest, main, or a full commit sha)"
-        required: true
-        default: "latest"
-
+        description: 'Image mode only: CI tag (blank uses this commit)'
+        required: false
+        default: ""
+permissions:
+  contents: read
 concurrency:
   group: deploy-production-miniapp
   cancel-in-progress: false
-
-env:
-  IMAGE: ghcr.io/${{ github.repository }}
-
 jobs:
   deploy:
-    name: Deploy to production
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Slow SSH uploads need the full GitHub-hosted runner allowance (6 hours).
+    timeout-minutes: 360
     environment: production
     permissions:
       contents: read
       packages: read
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve image references
-        id: img
-        env:
-          LOCAL_REGISTRY: ${{ vars.LOCAL_REGISTRY }}
-        run: |
-          if [ -n "$LOCAL_REGISTRY" ]; then
-            IMAGE="$LOCAL_REGISTRY/$GITHUB_REPOSITORY"
-          fi
-          echo "server=${IMAGE,,}/server:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
-          echo "web=${IMAGE,,}/web:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
-
-      # The server cannot reach ghcr.io, so the runner does all registry work
-      # and the images travel to the server over SSH.
-      - name: Pull images on the runner
-        if: vars.LOCAL_REGISTRY == ''
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker pull "${{ steps.img.outputs.server }}"
-          docker pull "${{ steps.img.outputs.web }}"
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        if: inputs.delivery == 'image'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<CONF
-          Host target
-            HostName ${{ secrets.SSH_HOST }}
-            User ${{ secrets.SSH_USER }}
-            Port ${{ vars.SSH_PORT || '22' }}
-            IdentityFile ~/.ssh/id_deploy
-            IdentitiesOnly yes
-            # Long image transfers: keep the session alive and fail sooner if
-            # the server is gone, instead of hanging until the runner times out.
-            ServerAliveInterval 30
-            ServerAliveCountMax 10
-            TCPKeepAlive yes
-          CONF
-
-      # MINIAPP_ENV holds the server's .env (see server/.env.example): DB_*
-      # matching the bot's, BOT_TOKEN, PUBLIC_URL (https://MINIAPP_DOMAIN),
-      # BOT_USERNAME, KAVENEGAR_*, PAYMENT_PROVIDER=kaino and KAINO_*, and optionally
-      # SERVER_PORT and WEB_PORT when 8090 and 8082 are taken.
-      - name: Build .env for the server
         env:
-          MINIAPP_ENV: ${{ secrets.MINIAPP_ENV }}
-        run: |
-          umask 077
-          printf '%s\n' "$MINIAPP_ENV" > env.out
-          # The deploy chooses the images; they are not part of the stored secret.
-          sed -i -e '/^MINIAPP_SERVER_IMAGE=/d' -e '/^MINIAPP_WEB_IMAGE=/d' env.out
-          echo "MINIAPP_SERVER_IMAGE=${{ steps.img.outputs.server }}" >> env.out
-          echo "MINIAPP_WEB_IMAGE=${{ steps.img.outputs.web }}" >> env.out
-
-      - name: Ship compose file and .env
-        run: |
-          DEPLOY_PATH="${{ vars.MINIAPP_DEPLOY_PATH }}"
-          ssh target "mkdir -p '$DEPLOY_PATH'"
-          scp docker-compose.prod.yml target:"$DEPLOY_PATH/docker-compose.yml"
-          scp env.out target:"$DEPLOY_PATH/.env"
-          ssh target "chmod 600 '$DEPLOY_PATH/.env'"
-
-      # Reuse unchanged image layers over SSH. First transfer seeds the cache;
-      # later deploys send changed content only. Falls back to gzip/scp if
-      # rsync is unavailable. The target still never needs registry access.
-      - name: Ship images to the server
-        if: vars.LOCAL_REGISTRY == ''
-        env:
-          DEPLOY_PATH: ${{ vars.MINIAPP_DEPLOY_PATH }}
-          SERVER_IMAGE: ${{ steps.img.outputs.server }}
-          WEB_IMAGE: ${{ steps.img.outputs.web }}
-        run: bash deploy/ship-images.sh
-
-      - name: Pull images from deployment registry
-        if: vars.LOCAL_REGISTRY != ''
-        env:
-          LOCAL_REGISTRY: ${{ vars.LOCAL_REGISTRY }}
-          LOCAL_REG_USER: ${{ secrets.LOCAL_REG_USER }}
-          LOCAL_REG_PASS: ${{ secrets.LOCAL_REG_PASS }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
         run: |
           set -euo pipefail
-          # Credentials travel on stdin, never in the remote command or .env.
-          [[ "$LOCAL_REGISTRY" =~ ^[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]
-          [[ "$LOCAL_REG_USER" =~ ^[a-zA-Z0-9_.-]+$ ]]
-          printf '%s' "$LOCAL_REG_PASS" | ssh target "docker login '$LOCAL_REGISTRY' -u '$LOCAL_REG_USER' --password-stdin"
-          ssh target bash -seuo pipefail <<'REMOTE'
-            cd "${{ vars.MINIAPP_DEPLOY_PATH }}"
-            # Explicit pull works with compose's pull_policy: never; up then
-            # uses these local images without a second registry request.
-            docker compose pull --policy always
-          REMOTE
-
-      - name: Start the mini app
-        run: |
-          ssh target bash -eu <<'REMOTE'
-            cd "${{ vars.MINIAPP_DEPLOY_PATH }}"
-            docker compose up -d --remove-orphans
-            docker compose ps
-          REMOTE
-
-      # /health/ready fails when Postgres is unreachable, the engine has not
-      # migrated the exchange schema, or Kafka is down - the usual ways this
-      # deploy goes wrong. /healthz and /api/v1/market/symbols check the web
-      # container and its proxy to the server.
-      - name: Health check
-        run: |
-          ssh target bash -eu <<'REMOTE'
-            ENV_FILE="${{ vars.MINIAPP_DEPLOY_PATH }}/.env"
-            SERVER_PORT=$(grep -E '^SERVER_PORT=' "$ENV_FILE" | cut -d= -f2 || true)
-            WEB_PORT=$(grep -E '^WEB_PORT=' "$ENV_FILE" | cut -d= -f2 || true)
-            SERVER_PORT="${SERVER_PORT:-8090}"
-            WEB_PORT="${WEB_PORT:-8082}"
-            for i in $(seq 1 30); do
-              if body=$(curl -fsS "http://127.0.0.1:$SERVER_PORT/health/ready") \
-                && curl -fsS "http://127.0.0.1:$WEB_PORT/healthz" >/dev/null \
-                && curl -fsS "http://127.0.0.1:$WEB_PORT/api/v1/market/symbols" >/dev/null; then
-                echo "server ready on $SERVER_PORT ($body), web up on $WEB_PORT"
-                exit 0
-              fi
-              sleep 2
-            done
-            echo "mini app did not become ready - last answers and recent logs:"
-            curl -sS "http://127.0.0.1:$SERVER_PORT/health/ready" || true
-            curl -sS "http://127.0.0.1:$WEB_PORT/healthz" || true
-            docker logs --tail 100 marketbot-miniapp-server || true
-            docker logs --tail 30 marketbot-miniapp-web || true
-            exit 1
-          REMOTE
-
-      - name: Report
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$SSH_USER" =~ ^[a-zA-Z0-9_-]+$ && "$SSH_PORT" =~ ^[0-9]+$ ]] || exit 1
+          test -n "$SSH_PRIVATE_KEY" && test -n "$SSH_KNOWN_HOSTS"
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<CONF
+          Host target
+            HostName $SSH_HOST
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 15
+            ServerAliveInterval 30
+            ServerAliveCountMax 10
+          CONF
+      - name: Build or transfer and activate release
+        env:
+          DEPLOY_PATH: ${{ vars.MINIAPP_DEPLOY_PATH }}
+          RUNTIME_ENV: ${{ secrets.MINIAPP_ENV }}
+          DELIVERY: ${{ inputs.delivery }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          BOT_USERNAME: ${{ vars.BOT_USERNAME }}
+        run: bash deploy/ship.sh
+      - name: Deployment summary
         if: always()
-        run: |
-          {
-            echo "### Mini app deploy ${{ job.status }}"
-            echo ""
-            echo "- Server image: \`${{ steps.img.outputs.server }}\`"
-            echo "- Web image: \`${{ steps.img.outputs.web }}\`"
-            echo "- Commit: \`${{ github.sha }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
+        env:
+          RESULT: ${{ job.status }}
+          IMAGE: ${{ inputs.delivery == 'image' && inputs.image_tag || github.sha }}
+        run: printf 'Deployment %s\n\nRelease %s\n' "$RESULT" "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
       # Requires the repository secrets TELEGRAM_BOT_TOKEN and
       # TELEGRAM_CHAT_ID_CICD; with either unset these steps quietly do nothing.
       - name: Compose Telegram message
@@ -184,24 +87,25 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
           IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_REF: ${{ inputs.delivery == 'image' && inputs.image_tag || github.sha }}
         run: |
           set -euo pipefail
 
           repo_url="${{ github.server_url }}/${{ github.repository }}"
           short_sha=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
-          tag=$(printf '%s' "$IMAGE_TAG" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+          image=$(printf '%s' "${IMAGE_REF:-$IMAGE_TAG}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 
           case "$JOB_STATUS" in
-            success) headline="🚀 <b>Mini app deploy succeeded</b>" ;;
-            cancelled) headline="⚪️ <b>Mini app deploy cancelled</b>" ;;
-            *) headline="🔥 <b>Mini app deploy FAILED</b>" ;;
+            success) headline="🚀 <b>marketbot-miniapp deploy succeeded</b>" ;;
+            cancelled) headline="⚪️ <b>marketbot-miniapp deploy cancelled</b>" ;;
+            *) headline="🔥 <b>marketbot-miniapp deploy FAILED</b>" ;;
           esac
 
           {
             echo "text<<TELEGRAM_EOF"
             echo "${headline}"
             echo ""
-            echo "📦 server + web <code>${tag}</code>"
+            echo "📦 <code>${image}</code>"
             echo "🔖 <code>${short_sha}</code>"
             echo "👤 ${{ github.actor }}"
             echo ""
@@ -217,6 +121,6 @@ jobs:
           chat_id: ${{ secrets.TELEGRAM_CHAT_ID_CICD }}
           message: ${{ steps.notify_msg.outputs.text }}
 
-      - name: Clean up
+      - name: Clean credentials
         if: always()
-        run: rm -f env.out miniapp-images.tar.gz ~/.ssh/id_deploy
+        run: rm -f env.out ~/.ssh/id_deploy ~/.ssh/config ~/.ssh/known_hosts

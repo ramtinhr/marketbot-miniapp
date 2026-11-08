@@ -25,7 +25,7 @@ class ShipImagesTest(unittest.TestCase):
         self.env = dict(os.environ, PATH=f'{self.bin}:{os.environ["PATH"]}',
                         FIXTURE=str(self.fixture), LOADED=str(self.root / 'loaded'),
                         LOAD_LOG=str(self.root / 'loads'), DEPLOY_PATH=str(self.deploy),
-                        SERVER_IMAGE='ghcr.io/example/server:latest', WEB_IMAGE='ghcr.io/example/web:latest')
+                        IMAGE='ghcr.io/example/frontend:latest')
         self.mock('docker', '''#!/bin/bash
 set -euo pipefail
 case "$1" in
@@ -96,7 +96,7 @@ shutil.copyfile(args[0], args[1].removeprefix('target:'))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('transferring a full gzip archive', result.stdout)
         self.assert_loaded()
-        self.assertFalse((self.deploy / 'miniapp-images.tar.gz.part').exists())
+        self.assertFalse((self.deploy / 'release-images.tar.gz.part').exists())
 
     @unittest.skipUnless(shutil.which('rsync'), 'rsync is needed to test an interrupted sync')
     def test_failed_transfer_never_loads_an_incomplete_cache(self):

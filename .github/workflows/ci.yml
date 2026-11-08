@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -19,10 +22,12 @@ jobs:
     name: Typecheck & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Both Dockerfiles' base image.
           node-version: 22
@@ -38,11 +43,6 @@ jobs:
             node --check "$f"
           done
 
-      - name: Test deployment image transfer
-        run: |
-          bash -n deploy/ship-images.sh
-          python3 -m unittest discover -s deploy -p 'test_*.py' -v
-
       - name: Test server
         run: npm test
 
@@ -51,6 +51,11 @@ jobs:
 
       - name: Build web
         run: npm run build
+
+      - name: Validate deployment scripts
+        run: |
+          for script in deploy/*.sh; do bash -n "$script"; done
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy -p 'test_*.py' -v
 
       - name: Validate compose files
         run: |
@@ -63,9 +68,10 @@ jobs:
           docker compose -f docker-compose.yml config -q
 
   image:
-    name: Build & Push ${{ matrix.part }} image
-    runs-on: ubuntu-latest
+    name: Build and verify container
     needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         part: [server, web]
@@ -73,55 +79,57 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Pull requests only build, to verify the Dockerfiles still work.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.part }}" >> "$GITHUB_OUTPUT"
+      - name: Build once
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.part }}/Dockerfile
+          load: true
+          tags: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.part }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.part }}
+          build-args: |
+            VITE_BOT_USERNAME=${{ vars.BOT_USERNAME }}
+      - name: Verify production image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          PART: ${{ matrix.part }}
+        run: |
+          set -euo pipefail
+          if [ "$PART" = server ]; then
+            docker run --rm --entrypoint node "$IMAGE" --check src/server.js
+            exit 0
+          fi
+          trap 'docker logs web-smoke; docker rm -f web-smoke' EXIT
+          docker run -d --name web-smoke -p 127.0.0.1:3301:80 "$IMAGE"
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 5 http://127.0.0.1:3301/healthz >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to deployment registry
-        if: github.event_name != 'pull_request' && vars.LOCAL_REGISTRY != ''
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ vars.LOCAL_REGISTRY }}
-          username: ${{ secrets.LOCAL_REG_USER }}
-          password: ${{ secrets.LOCAL_REG_PASS }}
-
-      - name: Image metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            ${{ env.IMAGE }}/${{ matrix.part }}
-            ${{ vars.LOCAL_REGISTRY != '' && format('{0}/{1}/{2}', vars.LOCAL_REGISTRY, github.repository, matrix.part) || '' }}
-          tags: |
-            type=ref,event=branch
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      # Both images build from the repository root, where the npm workspace and
-      # its lockfile live. VITE_BOT_USERNAME is baked into the web bundle (the
-      # "open in Telegram" link shown outside Telegram); the server ignores it.
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.part }}/Dockerfile
-          build-args: |
-            VITE_BOT_USERNAME=${{ vars.BOT_USERNAME }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.part }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.part }}
+      - name: Publish tested image
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+        run: |
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          docker tag "$IMAGE:sha-$GITHUB_SHA" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
 
   # Announce merges to main in Telegram. Requires the repository secrets
   # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID_CICD; with either unset the job runs
@@ -132,7 +140,9 @@ jobs:
     needs: [test, image]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # The commit subject and author are attacker-controlled text: they reach
       # bash through the environment, never through ${{ }} interpolation.
