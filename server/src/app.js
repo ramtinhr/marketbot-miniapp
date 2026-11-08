@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import Fastify from 'fastify';
 
+import { WebAuth } from './web-auth.js';
 import { httpError } from './errors.js';
 import { AUTHORITY_PATTERN, callbackParams } from './payments.js';
 import { isSymbol } from './trading.js';
@@ -41,14 +42,16 @@ a,button{display:block;width:100%;margin-top:12px;padding:14px;border:0;border-r
  *           wallets?: import('./wallets.js').Wallets, payments?: import('./payments.js').Payments,
  *           withdrawals?: import('./withdrawals.js').Withdrawals, trading?: import('./trading.js').Trading,
  *           auction?: import('./auction.js').Auction, rial?: import('./rial.js').Rial,
+ *           p2p?: import('./p2p.js').P2P,
  *           hub?: import('./hub.js').Hub, photos?: import('./photos.js').TelegramPhotos,
  *           bot?: import('./bot.js').Bot, botUsername?: string, paymentWebhookSecret?: string, logger?: object|boolean }} deps
  */
-export async function buildApp({ users, otp, wallets, payments, withdrawals, bankAccounts, trading, auction, rial, hub, photos, bot, botUsername = '', paymentWebhookSecret = '', logger = true }) {
+export async function buildApp({ users, otp, wallets, payments, withdrawals, bankAccounts, trading, auction, rial, p2p, hub, photos, bot, botUsername = '', customerWebUrl = '', trustedProxy = 'loopback', paymentWebhookSecret = '', logger = true }) {
+  const webAuth = otp && users.pg ? new WebAuth(users, otp) : null;
   const app = Fastify({
     logger,
     // Reached only through nginx on loopback, which sets X-Forwarded-For.
-    trustProxy: 'loopback',
+    trustProxy: trustedProxy,
     bodyLimit: 64 * 1024,
   });
 
@@ -142,6 +145,13 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, ban
         return { status: 'ok', ...session };
       });
 
+      if (webAuth) {
+        api.post('/auth/web/send', async (req) => webAuth.send(req.body?.phone, req.ip));
+        api.post('/auth/web/verify', async (req) => ({
+          status: 'ok', ...await webAuth.verify(req.body?.challenge_id, req.body?.code, meta(req)),
+        }));
+      }
+
       api.post('/auth/logout', async (req, reply) => {
         await users.logout(bearerToken(req.headers.authorization));
         return reply.code(204).send();
@@ -151,6 +161,7 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, ban
 
       if (photos) {
         api.get('/me/photo', { preHandler: requireUser }, async (req, reply) => {
+          if (!req.user.telegram_id) throw httpError(404, 'no_photo', 'no Telegram profile');
           let photo;
           try {
             photo = await photos.photo(req.user.telegram_id);
@@ -255,7 +266,8 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, ban
             } else if (p) {
               req.log.info({ payment: p.id, status: p.status }, 'payment returned unpaid');
             }
-            const back = botUsername ? `<a class="primary" href="https://t.me/${escapeHtml(botUsername)}">بازگشت به تلگرام</a>` : '';
+            const customerBack = customerWebUrl && /^https?:\/\//.test(customerWebUrl) ? `<a class="secondary" href="${escapeHtml(new URL('/wallet', customerWebUrl).href)}">بازگشت به پنل کاربری</a>` : '';
+            const back = customerBack + (botUsername ? `<a class="primary" href="https://t.me/${escapeHtml(botUsername)}">بازگشت به تلگرام</a>` : '');
             reply.type('text/html; charset=utf-8');
             if (p?.status === 'paid') {
               return page(
@@ -403,6 +415,15 @@ export async function buildApp({ users, otp, wallets, payments, withdrawals, ban
           const [book, offers, trades] = await Promise.all([auction.book(symbol), auction.offers(symbol), auction.trades(symbol)]);
           return { symbol, book, offers, trades };
         });
+      }
+
+      if (p2p) {
+        const guard = { preHandler: requireVerified };
+        api.get('/p2p/payments', guard, req => p2p.list(req.session.exchangeUserId));
+        api.post('/p2p/reserve', guard, req => p2p.reserve(req.session.exchangeUserId, req.body));
+        api.post('/p2p/payments/:id/receipt', { ...guard, bodyLimit: 768000 }, req => p2p.receipt(req.session.exchangeUserId, req.params.id, req.body));
+        api.post('/p2p/payments/:id/confirm', guard, req => p2p.confirm(req.session.exchangeUserId, req.params.id));
+        api.post('/p2p/payments/:id/dispute', guard, req => p2p.confirm(req.session.exchangeUserId, req.params.id, true));
       }
 
       // ---- Rial board: have / want Toman with a receive method ----------------

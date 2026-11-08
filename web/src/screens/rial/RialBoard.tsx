@@ -1,3 +1,4 @@
+import { P2PPanel } from './P2PPanel';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -101,7 +102,7 @@ function Composer({ onPlaced }: { onPlaced: (o: RialOrder) => void }) {
     const amountValue = parseAmount(amount, 0);
     const q = amountValue ? Number(amountValue) : 0;
     const irt = balanceOf(info, 'IRT').available;
-    const short = side === 'have' && method === 'wallet' && q > irt + 1e-9;
+    const short = ((side === 'have' && method === 'wallet') || (side === 'want' && method === 'p2p')) && q > irt + 1e-9;
     const needSheba = isBank(method) && side === 'want';
     const description = cleanNote(note);
     const noteLength = charCount(description);
@@ -116,7 +117,7 @@ function Composer({ onPlaced }: { onPlaced: (o: RialOrder) => void }) {
     const submit = async () => {
         if (busy) return;
         const problem = !amountValue ? 'invalid_amount'
-            : noteLong ? 'invalid_description'
+            : noteLong || (method === 'p2p' && (!description || side !== 'want')) ? 'invalid_description'
             : short ? 'insufficient_balance'
             : needSheba && !destination.trim() ? 'invalid_sheba'
             : null;
@@ -161,7 +162,7 @@ function Composer({ onPlaced }: { onPlaced: (o: RialOrder) => void }) {
                         onChange={(v) => { setSide(v); setError(null); }}
                         options={[
                             { value: 'want', label: t('rial.compose.want'), tone: 'buy' },
-                            { value: 'have', label: t('rial.compose.have'), tone: 'sell' },
+                            ...(method === 'p2p' ? [] : [{ value: 'have' as RialSide, label: t('rial.compose.have'), tone: 'sell' as const }]),
                         ]}
                     />
                 </div>
@@ -182,7 +183,7 @@ function Composer({ onPlaced }: { onPlaced: (o: RialOrder) => void }) {
                             <button
                                 key={m} type="button" role="radio" aria-checked={method === m}
                                 className={method === m ? 'active' : ''}
-                                onClick={() => { selection(); setMethod(m); setError(null); }}
+                                onClick={() => { selection(); setMethod(m); if (m === 'p2p') setSide('want'); setError(null); }}
                             >
                                 {t(`rial.method.${m}`)}
                             </button>
@@ -202,7 +203,7 @@ function Composer({ onPlaced }: { onPlaced: (o: RialOrder) => void }) {
                     </label>
                 )}
                 <label className="ab-row">
-                    <span className="ab-label">{t('rial.compose.note')}</span>
+                    <span className="ab-label">{method === 'p2p' ? 'محل دریافت / اطلاعات واریز (الزامی)' : t('rial.compose.note')}</span>
                     <span className={`ab-note-field ${noteLong ? 'invalid' : ''}`}>
                         <input
                             dir="rtl" autoComplete="off" enterKeyHint="done" maxLength={RIAL_DESCRIPTION_MAX + 20} value={note}
@@ -424,6 +425,7 @@ export function RialBoardPage() {
     const shown = useMemo(() => {
         let list = offers ?? [];
         if (sideFilter !== 'all') list = list.filter((o) => o.side === sideFilter);
+        list = list.filter(o => o.method !== 'p2p');
         if (methodFilter !== 'all') list = list.filter((o) => o.method === methodFilter);
         return list;
     }, [offers, sideFilter, methodFilter]);
@@ -451,7 +453,7 @@ export function RialBoardPage() {
             void refreshWallet();
         } catch (err) {
             haptic('error');
-            toast(errorMessage(err instanceof ApiError ? err.code : 'unknown'));
+            toast(errorMessage(err instanceof ApiError ? err.code : 'unknown'), 'danger');
         } finally {
             setCancelling(null);
         }
@@ -515,9 +517,12 @@ export function RialBoardPage() {
                 )}
             </ol>
 
+            <P2PPanel />
+
             <Composer onPlaced={(o) => {
                 applyMine(o);
                 setOffers((prev) => {
+                    if (o.method === 'p2p') return prev;
                     const offer: RialOffer = {
                         id: o.id, side: o.side, amount: o.amount, remaining: o.remaining,
                         method: o.method, description: o.description, created_at: o.created_at,

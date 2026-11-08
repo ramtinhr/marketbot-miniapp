@@ -1,3 +1,4 @@
+import { P2P } from './p2p.js';
 import { BankAccounts } from './bank-accounts.js';
 import { buildApp } from './app.js';
 import { Auction } from './auction.js';
@@ -84,6 +85,16 @@ const withdrawals = new Withdrawals(pg, wallets);
 const exchange = new ExchangeBridge({ brokers: config.exchange.brokers, clientId: config.exchange.clientId, log: bootLog });
 const trading = new Trading({ pg, exchange, slippageBps: config.exchange.marketSlippageBps, log: bootLog });
 const auction = new Auction({ pg, wallets, log: bootLog });
+const p2p = new P2P(pg);
+let p2pMaintenanceRunning = false;
+const p2pTimer = setInterval(async () => {
+  if (p2pMaintenanceRunning) return;
+  p2pMaintenanceRunning = true;
+  try { await p2p.maintain(); }
+  catch (err) { bootLog.error({ err }, 'P2P maintenance failed'); }
+  finally { p2pMaintenanceRunning = false; }
+}, 10000);
+p2pTimer.unref();
 const rial = new Rial({ pg, wallets, log: bootLog });
 const hub = new Hub({ exchange, auction, rial, pg, log: bootLog });
 const photos = new TelegramPhotos({ botToken: config.auth.botToken, ...config.telegram, log: bootLog });
@@ -111,10 +122,13 @@ const app = await buildApp({
   trading,
   auction,
   rial,
+  p2p,
   hub,
   photos,
   bot,
   botUsername: config.botUsername,
+  customerWebUrl: config.customerWebUrl,
+  trustedProxy: config.trustedProxy,
   logger: { level: config.logLevel },
 });
 
@@ -129,6 +143,8 @@ users.ready().catch((err) => app.log.error({ err: { message: err.message } }, 'c
 exchange.start();
 
 pg.on('error', (err) => app.log.error({ err }, 'postgres pool error'));
+
+app.addHook('onClose', async () => clearInterval(p2pTimer));
 
 let closing = false;
 async function shutdown(signal) {

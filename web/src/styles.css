@@ -468,7 +468,8 @@ li + li > .row::before {
 }
 .toast svg { width: 20px; height: 20px; }
 .toast.success svg { color: #4ade80; }
-.toast.danger svg { color: #ff7b7b; }
+.toast.danger { color: #ff7b7b; }
+.toast.danger svg { color: inherit; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(14px) scale(.97); } }
 
 /* Segmented control */
@@ -960,6 +961,7 @@ button.balance-card { cursor: pointer; }
 .tf-summary dt { color: var(--hint); }
 .tf-summary dd { margin: 0; font-variant-numeric: tabular-nums; }
 .tf-note { color: var(--hint); font-size: .75rem; line-height: 1.6; }
+.lead.error-message { color: var(--danger); }
 .tf-error { color: var(--danger); font-size: .82rem; font-weight: 600; }
 .tf .button { min-height: 50px; }
 

@@ -123,7 +123,7 @@ export class Rial extends EventEmitter {
   offers({ side = null, method = null, limit = BOARD_OFFERS } = {}) {
     return this.#run(async () => {
       const params = [OPEN];
-      let where = 'status = ANY($1)';
+      let where = "status = ANY($1) AND method <> 'p2p'";
       if (side === 'have' || side === 'want') where += ` AND side = $${params.push(side)}`;
       if (RIAL_METHODS.includes(method)) where += ` AND method = $${params.push(method)}`;
       const { rows } = await this.pg.query(
@@ -170,6 +170,9 @@ export class Rial extends EventEmitter {
     if (!amount || !/^\d+$/.test(amount)) throw httpError(400, 'invalid_amount', 'amount must be a positive whole number of Toman');
     if (b.description != null && typeof b.description !== 'string') throw httpError(400, 'invalid_description', 'description must be text');
     const description = cleanDescription(b.description);
+    if (method === 'p2p' && (b.side !== 'want' || !description)) {
+      throw httpError(400, 'invalid_description', 'P2P receive requests require payment instructions');
+    }
     if ([...description].length > DESCRIPTION_MAX) {
       throw httpError(400, 'invalid_description', `description must be at most ${DESCRIPTION_MAX} characters`);
     }
@@ -222,6 +225,7 @@ export class Rial extends EventEmitter {
         const { rows: [row] } = await c.query(`SELECT ${COLUMNS} FROM miniapp_rial_offers WHERE id = $1 FOR UPDATE`, [offerId]);
         if (!row) throw httpError(404, 'offer_gone', 'no such offer');
         const maker = stateOf(row);
+        if (maker.method === 'p2p') throw httpError(409, 'reservation_required', 'use the P2P reservation flow');
         if (!OPEN.includes(maker.status)) throw httpError(409, 'offer_gone', 'the offer is already filled or cancelled');
         if (maker.userId === exchangeUserId) throw httpError(409, 'own_offer', 'an offer cannot be taken by its own poster');
         const left = maker.amount - maker.filled;
@@ -273,6 +277,10 @@ export class Rial extends EventEmitter {
         if (!row) throw httpError(404, 'order_not_found', 'no such rial offer for this user');
         const o = stateOf(row);
         if (!OPEN.includes(o.status)) throw httpError(409, 'order_closed', 'the order is already filled or cancelled');
+        if (o.method === 'p2p') {
+          const pending = await c.query("SELECT 1 FROM miniapp_p2p_payments WHERE offer_id=$1 AND status IN ('reserved','awaiting_confirmation','admin_review') LIMIT 1", [o.id]);
+          if (pending.rows.length) throw httpError(409, 'payment_pending', 'pending payments must be resolved first');
+        }
         return this.#close(c, o, actor);
       }),
     );
@@ -285,7 +293,7 @@ export class Rial extends EventEmitter {
    *   counter-offer is inserted already filled. Wallet "have" always freezes.
    */
   async #insert(c, exchangeUserId, o, actor, { resting = true } = {}) {
-    const needFreeze = o.method === 'wallet' && o.side === 'have';
+    const needFreeze = (o.method === 'wallet' && o.side === 'have') || (o.method === 'p2p' && o.side === 'want');
     const hold = needFreeze ? o.amount : '0';
     const { rows: [row] } = await c.query(
       `INSERT INTO miniapp_rial_offers

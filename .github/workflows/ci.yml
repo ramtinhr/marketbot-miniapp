@@ -87,11 +87,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to deployment registry
+        if: github.event_name != 'pull_request' && vars.LOCAL_REGISTRY != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.LOCAL_REGISTRY }}
+          username: ${{ secrets.LOCAL_REG_USER }}
+          password: ${{ secrets.LOCAL_REG_PASS }}
+
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}/${{ matrix.part }}
+          images: |
+            ${{ env.IMAGE }}/${{ matrix.part }}
+            ${{ vars.LOCAL_REGISTRY != '' && format('{0}/{1}/{2}', vars.LOCAL_REGISTRY, github.repository, matrix.part) || '' }}
           tags: |
             type=ref,event=branch
             type=sha,format=long

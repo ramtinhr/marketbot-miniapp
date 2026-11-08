@@ -18,6 +18,8 @@ export const config = {
   host: str('HOST', '0.0.0.0'),
   port: int('PORT', 8090),
   logLevel: str('LOG_LEVEL', 'info'),
+  trustedProxy: str('TRUSTED_PROXY_CIDRS', 'loopback').split(',').map(s => s.trim()).filter(Boolean),
+  customerWebUrl: str('CUSTOMER_WEB_URL', ''),
   production,
   // Where users reach the app (https://...), for the payment gateway's return URL.
   publicUrl: str('PUBLIC_URL', '').replace(/\/+$/, ''),

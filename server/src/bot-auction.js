@@ -1039,7 +1039,7 @@ export class AuctionChat {
       const makerSide = t.taker_side === 'buy' ? 'sell' : 'buy';
       const makerId = makerSide === 'buy' ? t.buy_user_id : t.sell_user_id;
       if (!makerId) continue;
-      const { rows } = await this.pg.query('SELECT telegram_id FROM miniapp_users WHERE exchange_user_id = $1 AND blocked_at IS NULL', [makerId]);
+      const { rows } = await this.pg.query('SELECT telegram_id FROM miniapp_users WHERE exchange_user_id = $1 AND blocked_at IS NULL AND telegram_id IS NOT NULL', [makerId]);
       const total = Number(t.price) * Number(t.quantity);
       for (const { telegram_id: chatId } of rows) {
         out.push({

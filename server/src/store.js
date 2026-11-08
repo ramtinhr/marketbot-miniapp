@@ -93,10 +93,20 @@ export class UserStore {
     let row;
     try {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [phone]);
+      // Attach a browser-only customer to Telegram without losing its identity.
+      const browser = await client.query('SELECT id FROM miniapp_users WHERE phone = $1 AND telegram_id IS NULL FOR UPDATE', [phone]);
+      const existing = await client.query('SELECT id FROM miniapp_users WHERE telegram_id = $1', [tg.id]);
+      if (browser.rows.length && existing.rows.length) {
+        throw httpError(409, 'account_link_conflict', 'this Telegram identity already belongs to another customer');
+      }
+      if (browser.rows.length && !existing.rows.length) {
+        await client.query('UPDATE miniapp_users SET telegram_id = $2 WHERE id = $1', [browser.rows[0].id, tg.id]);
+      }
       // A number belongs to whoever Telegram says holds it now. An account that
       // had it before keeps its row, loses the number and its sessions, and is
       // asked to share a number on its next visit.
-      const taken = await client.query('SELECT id FROM miniapp_users WHERE phone = $1 AND telegram_id <> $2 FOR UPDATE', [phone, tg.id]);
+      const taken = await client.query('SELECT id FROM miniapp_users WHERE phone = $1 AND (telegram_id IS NULL OR telegram_id <> $2) FOR UPDATE', [phone, tg.id]);
       if (taken.rows.length) {
         await client.query('UPDATE miniapp_users SET phone = NULL WHERE id = $1', [taken.rows[0].id]);
         await client.query('DELETE FROM miniapp_sessions WHERE user_id = $1', [taken.rows[0].id]);
@@ -116,6 +126,25 @@ export class UserStore {
       client.release();
     }
     return this.startSession(row, tg, meta);
+  }
+
+  /** Called only after the browser SMS challenge has been consumed. */
+  async loginWithVerifiedPhone(phone, meta) {
+    await this.ready();
+    const { rows } = await this.pg.query(
+      `INSERT INTO miniapp_users (phone) VALUES ($1)
+       ON CONFLICT (phone) DO UPDATE SET last_login_at = now()
+       RETURNING ${USER_COLUMNS}`, [phone],
+    );
+    const row = rows[0];
+    const session = await this.startSession(row, row, meta);
+    try {
+      await this.verifySession(sha256(session.token), session.user);
+    } catch (err) {
+      await this.logout(session.token);
+      throw err;
+    }
+    return { ...session, verified: true };
   }
 
   async startSession(row, tg, { ip = null, userAgent = null } = {}) {
@@ -193,7 +222,7 @@ export class UserStore {
           const created = await client.query(
             `INSERT INTO exchange.users (username, display_name, first_name, last_name, phone, status, is_demo, created_by)
              VALUES ($1, $2, $3, $4, $5, 'active', false, 'miniapp') RETURNING id`,
-            [`tg${user.telegram_id}`, displayName, user.first_name, user.last_name, user.phone],
+            [user.telegram_id ? `tg${user.telegram_id}` : `web${user.id}`, displayName, user.first_name, user.last_name, user.phone],
           );
           exchangeUserId = created.rows[0].id;
         }

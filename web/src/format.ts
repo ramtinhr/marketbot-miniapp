@@ -82,13 +82,16 @@ export function asciiNumber(raw: string): string {
     return raw
         .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
         .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-        .replace(/[٫/]/g, '.')
-        .replace(/[,٬\s]/g, '');
+        .replace(/٫/g, '.')
+        .replace(/[,٬]/g, '').trim();
 }
 
 /** A typed amount as the decimal string the server takes, or null. */
 export function parseAmount(raw: string, maxDecimals = 8): string | null {
-    const s = asciiNumber(raw);
+    const typed = raw.replace(/[۰-۹]/g, d => String(d.charCodeAt(0)-0x06f0)).replace(/[٠-٩]/g, d => String(d.charCodeAt(0)-0x0660)).replace(/٫/g,'.').trim();
+    const whole = typed.split('.')[0];
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,3}(?:٬\d{3})+)$/.test(whole)) return null;
+    const s = asciiNumber(typed);
     const re = maxDecimals ? new RegExp(`^\\d{1,15}(\\.\\d{1,${maxDecimals}})?$`) : /^\d{1,15}$/;
     return re.test(s) && Number(s) > 0 ? s.replace(/^0+(?=\d)/, '') : null;
 }
@@ -103,12 +106,13 @@ export function toAmount(n: number, digits = 8): string {
 }
 
 /** What an amount input shows while typing: ASCII digits grouped, the decimals as typed. */
-export function groupTyped(raw: string, maxDecimals: number): string {
-    const s = asciiNumber(raw).replace(/[^\d.]/g, '');
-    const [int = '', ...rest] = s.split('.');
-    const dec = rest.join('').slice(0, maxDecimals);
-    const grouped = int.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return maxDecimals && s.includes('.') ? `${grouped || '0'}.${dec}` : grouped;
+export function groupTyped(raw: string, _maxDecimals: number): string {
+    const normalized = raw.replace(/[۰-۹]/g, d => String(d.charCodeAt(0)-0x06f0)).replace(/[٠-٩]/g, d => String(d.charCodeAt(0)-0x0660)).replace(/٫/g,'.');
+    const clean = normalized.replace(/[,٬]/g,'');
+    if (!/^\d*(?:\.\d*)?$/.test(clean)) return normalized;
+    const [int='', dec] = clean.split('.');
+    const grouped = int.replace(/^0+(?=\d)/,'').replace(/\B(?=(\d{3})+(?!\d))/g,',');
+    return (grouped || (dec !== undefined ? '0' : '')) + (dec !== undefined ? '.'+dec : '');
 }
 
 const timeFormat = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });

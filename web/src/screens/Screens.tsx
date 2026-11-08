@@ -79,7 +79,7 @@ export function ErrorScreen({ code, onRetry }: { code: string; onRetry: () => vo
             <Badge icon={ERROR_ICONS[code] ?? AlertIcon} tone="danger" size="lg" />
             <div className="stack">
                 <h1>{t('error.title')}</h1>
-                <p className="lead">{errorMessage(code)}</p>
+                <p className="lead error-message" role="alert">{errorMessage(code)}</p>
             </div>
             {code !== 'blocked' && (
                 <MainAction

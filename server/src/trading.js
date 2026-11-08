@@ -26,11 +26,13 @@ export const isUUID = (v) => UUID_RE.test(String(v ?? ''));
 
 /** Persian digits, the Persian decimal mark and grouping removed: what the engine wants. */
 export function asciiAmount(raw) {
-  const s = String(raw ?? '')
+  const typed = String(raw ?? '').replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-0x06f0)).replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-0x0660)).replace(/٫/g,'.').trim();
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,3}(?:٬\d{3})+)$/.test(typed.split('.')[0])) return null;
+  const s = typed
     .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
     .replace(/٫/g, '.')
-    .replace(/[,٬\s]/g, '');
+    .replace(/[,٬]/g, '');
   return AMOUNT_RE.test(s) && Number(s) > 0 ? s : null;
 }
 

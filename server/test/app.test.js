@@ -84,3 +84,18 @@ test('without a bot token every route says so; health does not depend on it', as
   assert.equal(res.json().code, 'not_configured');
   assert.equal((await a.inject('/health')).statusCode, 200);
 });
+
+test('payment callback offers the independent customer wallet alongside Telegram', async () => {
+  const app = await buildApp({
+    users: fakeUsers(),
+    customerWebUrl: 'https://customers.example.com',
+    botUsername: 'marketbot_test',
+    payments: { gateway: { name: 'test' }, async complete() { return { id: 'p', status: 'paid', amount_toman: 10000, ref_id: 'ref', exchange_user_id: 'u' }; } },
+    logger: false,
+  });
+  const response = await app.inject('/api/v1/payments/callback/test-authority');
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /href="https:\/\/customers\.example\.com\/wallet"/);
+  assert.match(response.body, /https:\/\/t\.me\/marketbot_test/);
+  await app.close();
+});

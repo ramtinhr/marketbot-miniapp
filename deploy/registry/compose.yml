@@ -1,0 +1,22 @@
+name: marketbot-registry
+services:
+  registry:
+    image: registry:3
+    restart: unless-stopped
+    ports:
+      - "${REGISTRY_PORT:-5443}:5000"
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_HTTP_TLS_CERTIFICATE: /certificates/live/${REGISTRY_DOMAIN:?set REGISTRY_DOMAIN}/fullchain.pem
+      REGISTRY_HTTP_TLS_KEY: /certificates/live/${REGISTRY_DOMAIN:?set REGISTRY_DOMAIN}/privkey.pem
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: MarketBot Registry
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      OTEL_TRACES_EXPORTER: none
+    volumes:
+      - registry-data:/var/lib/registry
+      - ./auth:/auth:ro
+      # Mount the whole tree so Let's Encrypt's live/ symlinks resolve.
+      - ${REGISTRY_CERTIFICATES_DIR:?set REGISTRY_CERTIFICATES_DIR}:/certificates:ro
+volumes:
+  registry-data:

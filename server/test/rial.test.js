@@ -24,7 +24,7 @@ test('bank "want" offers require a valid Sheba; wallet and p2p do not', () => {
   assert.equal(rial.normalize({ ...base, method: 'paya', destination: sheba }).destination, sheba);
   assert.equal(rial.normalize({ ...base, method: 'satna', destination: sheba.toLowerCase() }).destination, sheba);
   assert.equal(rial.normalize({ side: 'have', method: 'paya', amount: '50000' }).destination, null);
-  assert.equal(rial.normalize({ ...base, method: 'p2p' }).destination, null);
+  assert.equal(rial.normalize({ ...base, method: 'p2p', description: 'حساب مقصد' }).destination, null);
 });
 
 test('an offer\'s description is optional, kept on one line, and at most 120 characters', () => {
@@ -32,4 +32,10 @@ test('an offer\'s description is optional, kept on one line, and at most 120 cha
   assert.equal(rial.normalize({ ...base, description: 'ا'.repeat(120) }).description.length, 120);
   assert.throws(() => rial.normalize({ ...base, description: 'ا'.repeat(121) }), { code: 'invalid_description' });
   assert.throws(() => rial.normalize({ ...base, description: 5 }), { code: 'invalid_description' });
+});
+
+test('P2P only allows funded receive requests with payment instructions', () => {
+  assert.throws(() => rial.normalize({ ...base, method: 'p2p' }), { code: 'invalid_description' });
+  assert.throws(() => rial.normalize({ ...base, method: 'p2p', description: '  ' }), { code: 'invalid_description' });
+  assert.throws(() => rial.normalize({ ...base, method: 'p2p', side: 'have', description: 'test' }), { code: 'invalid_description' });
 });

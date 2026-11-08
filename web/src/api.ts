@@ -110,6 +110,12 @@ export interface RialTrade {
     executed_at: string;
     side?: RialSide;
 }
+export interface P2PPayment {
+    id: string; offer_id: string; amount: string; description: string;
+    status: 'reserved' | 'expired' | 'awaiting_confirmation' | 'admin_review' | 'settled' | 'rejected';
+    role?: 'payer' | 'receiver'; expires_at: string; confirmation_due_at: string | null;
+    receipt: string | null; receipt_reference: string | null; review_reason?: string;
+}
 export interface RialBoard { offers: RialOffer[]; trades: RialTrade[] }
 export const RIAL_METHODS: RialMethod[] = ['wallet', 'p2p', 'paya', 'satna'];
 export const RIAL_BANK_METHODS: RialMethod[] = ['paya', 'satna'];
@@ -212,6 +218,11 @@ export const api = {
     cancelAllAuctionOrders: (symbol: string | null = null) => post<{ orders: Order[] }>('/auction/orders/cancel-all', symbol ? { symbol } : {}),
     takeAuctionOffer: (id: string, quantity: string) => post<{ order: Order; trades: MarketTrade[] }>(`/auction/offers/${id}/take`, { quantity }),
 
+    p2pPayments: () => request<{ payments: P2PPayment[] }>('/p2p/payments'),
+    reserveP2P: (amount: string) => post<{ payments: P2PPayment[] }>('/p2p/reserve', { amount }),
+    p2pReceipt: (id: string, receipt: string, reference: string) => post(`/p2p/payments/${id}/receipt`, { receipt, reference }),
+    p2pConfirm: (id: string) => post(`/p2p/payments/${id}/confirm`),
+    p2pDispute: (id: string) => post(`/p2p/payments/${id}/dispute`),
     rial: (params: { side?: RialSide | null; method?: RialMethod | null } = {}) =>
         request<RialBoard>(`/rial${query({ side: params.side, method: params.method })}`),
     rialOrders: (scope: 'open' | 'history' | 'all' = 'open') =>

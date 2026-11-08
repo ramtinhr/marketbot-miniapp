@@ -1,3 +1,4 @@
+import { watchAuction } from './auction-notifications.js';
 // Fans the exchange's Kafka stream out to the app's WebSockets (ported from
 // marketbot-api's ExchangeHub). Each client watches one pair, and - once it
 // has authenticated with a verified session - its own exchange account: it
@@ -36,6 +37,7 @@ export class Hub {
     exchange.on('status', this.onStatus);
     this.onAuction = (change) => this.#auction(change);
     auction?.on('change', this.onAuction);
+    this.stopAuctionNotifications = auction ? watchAuction(this) : () => {};
     this.onRial = (change) => this.#rial(change);
     rial?.on('change', this.onRial);
   }
@@ -189,6 +191,7 @@ export class Hub {
   }
 
   close() {
+    this.stopAuctionNotifications();
     this.exchange.off('depth', this.onDepth);
     this.exchange.off('event', this.onEvent);
     this.exchange.off('status', this.onStatus);

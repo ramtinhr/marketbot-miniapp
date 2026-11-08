@@ -343,3 +343,23 @@ revision and license are retained in `web/public/banks/NOTICE.md` and
 use bank-inspired palettes rather than replicas of specific physical cards.
 Use `http://localhost:5174/?preview=banks` with the Vite development server to
 see synthetic Parsian, Mellat and Saman accounts outside Telegram.
+
+
+## Independent customer website
+
+The desktop customer portal is a separate Next.js project, `marketbot-frontend`.
+The Telegram UI in `web/` remains a Telegram Mini App. The portal imports no
+source code from this repository and is installed and deployed independently.
+
+This backend exposes the shared customer API, including browser SMS sign-in:
+`POST /api/v1/auth/web/send {phone}` returns a challenge ID and cooldown;
+`POST /api/v1/auth/web/verify {challenge_id, code}` returns a verified session
+only after SMS proof. Configure the independent portal's server-only
+`MARKETBOT_API_URL` to reach this service. Its BFF stores the session in an
+HttpOnly cookie, rather than exposing bearer tokens to browser JavaScript.
+
+The idempotent schema migration makes `telegram_id` nullable for browser-only
+customers and adds expiring, throttled SMS challenges. Existing customers are
+reused by phone; a browser-only customer can later attach a new Telegram
+identity to the same row. Conflicting account links are refused with
+`account_link_conflict` instead of silently merging customer records.

@@ -36,13 +36,19 @@ jobs:
 
       - name: Resolve image references
         id: img
+        env:
+          LOCAL_REGISTRY: ${{ vars.LOCAL_REGISTRY }}
         run: |
+          if [ -n "$LOCAL_REGISTRY" ]; then
+            IMAGE="$LOCAL_REGISTRY/$GITHUB_REPOSITORY"
+          fi
           echo "server=${IMAGE,,}/server:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
           echo "web=${IMAGE,,}/web:${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
 
       # The server cannot reach ghcr.io, so the runner does all registry work
       # and the images travel to the server over SSH.
       - name: Pull images on the runner
+        if: vars.LOCAL_REGISTRY == ''
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker pull "${{ steps.img.outputs.server }}"
@@ -96,11 +102,31 @@ jobs:
       # later deploys send changed content only. Falls back to gzip/scp if
       # rsync is unavailable. The target still never needs registry access.
       - name: Ship images to the server
+        if: vars.LOCAL_REGISTRY == ''
         env:
           DEPLOY_PATH: ${{ vars.MINIAPP_DEPLOY_PATH }}
           SERVER_IMAGE: ${{ steps.img.outputs.server }}
           WEB_IMAGE: ${{ steps.img.outputs.web }}
         run: bash deploy/ship-images.sh
+
+      - name: Pull images from deployment registry
+        if: vars.LOCAL_REGISTRY != ''
+        env:
+          LOCAL_REGISTRY: ${{ vars.LOCAL_REGISTRY }}
+          LOCAL_REG_USER: ${{ secrets.LOCAL_REG_USER }}
+          LOCAL_REG_PASS: ${{ secrets.LOCAL_REG_PASS }}
+        run: |
+          set -euo pipefail
+          # Credentials travel on stdin, never in the remote command or .env.
+          [[ "$LOCAL_REGISTRY" =~ ^[a-zA-Z0-9.-]+(:[0-9]+)?$ ]]
+          [[ "$LOCAL_REG_USER" =~ ^[a-zA-Z0-9_.-]+$ ]]
+          printf '%s' "$LOCAL_REG_PASS" | ssh target "docker login '$LOCAL_REGISTRY' -u '$LOCAL_REG_USER' --password-stdin"
+          ssh target bash -seuo pipefail <<'REMOTE'
+            cd "${{ vars.MINIAPP_DEPLOY_PATH }}"
+            # Explicit pull works with compose's pull_policy: never; up then
+            # uses these local images without a second registry request.
+            docker compose pull --policy always
+          REMOTE
 
       - name: Start the mini app
         run: |
